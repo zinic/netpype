@@ -11,6 +11,7 @@ console = logging.StreamHandler()
 def to_console(logger):
     logger.setLevel(logging.DEBUG)
     logger.addHandler(console)
+    logger.propagate = False
 
 map(to_console,
     (logging.getLogger('netpype'),
@@ -35,7 +36,12 @@ class BasicEPollHandler(netpype.epoll.AbstractEPollHandler):
 
     def on_read(self, event, manager):
         data = event.read()
-        _LOG.info('Read {} bytes.'.format(len(data)))
+        manager.request_write()
+        _LOG.info('Read {} bytes as:\n{}'.format(len(data), data))
+
+    def on_write(self, event, manager):
+        event.write(b'HTTP/1.1 200 OK\r\n\r\n')
+        manager.request_close()
 
 
 class PipelineFactory(netpype.epoll.HandlerPipelineFactory):
