@@ -377,7 +377,7 @@ class EPollServer(PersistentProcess):
     def process(self, kwargs):
         try:
             # Events take priority
-            if not self._event_queue.empty():
+            while not self._event_queue.empty():
                 self.on_event(self._event_queue.get_nowait())
 
             # Poll
@@ -389,9 +389,6 @@ class EPollServer(PersistentProcess):
                 else:
                     self.skip_epoll = True
             else:
-                # Events take priority
-                while not self._event_queue.empty():
-                    self.on_event(self._event_queue.get_nowait())
                 self.skip_epoll = False
         except Exception as ex:
             _LOG.exception(ex)

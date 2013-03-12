@@ -5,6 +5,7 @@ import netpype.epoll
 
 import multiprocessing
 
+import cprofile
 
 console = logging.StreamHandler()
 
