@@ -7,6 +7,7 @@ import time
 
 from collections import deque
 from multiprocessing import reduction, Pool, Queue, Value, cpu_count
+from multiprocessing.forking import close as f_close
 from netpype import PersistentProcess
 
 
@@ -179,97 +180,88 @@ class ChannelHandle(object):
         if not self._channel:
             self._channel_fd = reduction.rebuild_handle(self._handle)
             self._channel = socket.fromfd(self._channel_fd, self.socket_type, socket.SOCK_STREAM)
+            self._channel.setblocking(0)
         return self._channel
 
     def close(self):
-        #if self._channel:
-            #self._channel.close()
-        pass
+        f_close(self._channel_fd)
+        self._channel.close()
+
 
 class ChannelDescriptor(object):
 
     def __init__(self, channel, address, pipeline):
-        self.state = ChannelState(channel.fileno())
+        self.state = ChannelState()
+        self.fileno = channel.fileno()
         self.channel = channel
         self.address = address
         self.pipeline = pipeline
 
+    def new_handle(self):
+        return ChannelHandle(self.fileno, self.channel.type)
+
 
 class ChannelState(object):
 
-    def __init__(self, fileno):
+    def __init__(self):
         self._processing = False
-        self._fileno = fileno
+        self._last_event = -1
+
+    def is_interested(self, event):
+        return event != self._last_event
 
     def in_use(self):
         return self._processing
 
-    def use(self):
+    def use(self, event):
         #_LOG.debug('Channel {} in use.'.format(self._fileno))
         self._processing = True
+        self._last_event = event
 
     def release(self, arg=None):
         #_LOG.debug('Channel {} released.'.format(self._fileno))
         self._processing = False
 
 
-def drive_pipeline_event(event, fileno, pipeline):
-    #_LOG.debug('Driving event: {}.'.format(event.signal))
+def drive_event(event, fileno, pipeline, handle=None):
+    _LOG.debug('Driving event: {} for {}.'.format(event.signal, fileno))
 
     try:
         msg_obj = event
+        channel_event = RELEASE_SOCKET
 
         if event.signal == CONNECTED:
-            #_LOG.debug('Dispatching CONNECTED to {} downstream pipeline handlers.'.format(len(pipeline.downstream)))
-            manager = ChannelManager(fileno, drive_pipeline_event._queue)
-            try:
-                for handler in pipeline.downstream:
-                    next_msg = handler.on_connect(msg_obj, manager)
-                    msg_obj = next_msg if next_msg else msg_obj
-            finally:
-                drive_pipeline_event._queue.put(ChannelInterestEvent(RELEASE_SOCKET, fileno))
+            manager = ChannelManager(fileno, drive_event._queue)
+            for handler in pipeline.downstream:
+                next_msg = handler.on_connect(msg_obj, manager)
+                msg_obj = next_msg if next_msg else msg_obj
+        elif event.signal == READ_AVAILABLE:
+            manager = ChannelManager(fileno, drive_event._queue)
+            for handler in pipeline.downstream:
+                next_msg = handler.on_read(msg_obj, manager)
+                msg_obj = next_msg if next_msg else msg_obj
+        elif event.signal == WRITE_AVAILABLE:
+            manager = ChannelManager(fileno, drive_event._queue)
+            for handler in pipeline.upstream:
+                next_msg = handler.on_write(msg_obj, manager)
+                msg_obj = next_msg if next_msg else msg_obj
         elif event.signal == CLOSED:
-            #_LOG.debug('Dispatching CLOSED to all pipeline handlers.')
-            try:
-                for handler in pipeline.downstream:
-                    next_msg = handler.on_close(msg_obj)
-                    msg_obj = next_msg if next_msg else msg_obj
-            finally:
-                drive_pipeline_event._queue.put(ChannelInterestEvent(RECLAIM_SOCKET, fileno))
+            channel_event = RECLAIM_SOCKET
+            for handler in pipeline.downstream:
+                next_msg = handler.on_close(msg_obj)
+                msg_obj = next_msg if next_msg else msg_obj
         else:
             _LOG.error('Unable to drive pipeline event: {}.'.format(event.signal))
     except Exception as ex:
         _LOG.exception(ex)
     finally:
-        #_LOG.debug('Exiting channel driving for event: {}.'.format(event.signal))
-        pass
+        if handle:
+            handle.close()
+        drive_event._queue.put(ChannelInterestEvent(channel_event, fileno))
 
-
-def drive_channel_event(event, channel_handle, pipeline):
-    try:
-        manager = ChannelManager(channel_handle.fileno, drive_pipeline_event._queue)
-        msg_obj = event
-
-        if event.signal == READ_AVAILABLE:
-            for handler in pipeline.downstream:
-                next_msg = handler.on_read(msg_obj, manager)
-                msg_obj = next_msg if next_msg else msg_obj
-        elif event.signal == WRITE_AVAILABLE:
-            for handler in pipeline.upstream:
-                next_msg = handler.on_write(msg_obj, manager)
-                msg_obj = next_msg if next_msg else msg_obj
-        else:
-            _LOG.error('Unable to drive channel event: {}.'.format(event.signal))
-    except Exception as ex:
-        _LOG.exception(ex)
-    finally:
-        channel_handle.close()
-        drive_channel_event._queue.put(ChannelInterestEvent(RELEASE_SOCKET, channel_handle.fileno))
-        #_LOG.debug('Exiting channel driving for event: {}.'.format(event.signal))
 
 def driver_init(queue):
-    drive_pipeline_event._queue = queue
-    drive_channel_event._queue = queue
+    drive_event._queue = queue
 
 
 class EPollServer(PersistentProcess):
@@ -296,16 +288,17 @@ class EPollServer(PersistentProcess):
             self._socket_info.socket_type,
             self._socket_info.bind_address,
             self._socket_info.bind_port)
-        self._epoll.register(self._socket.fileno(), select.EPOLLIN)
+        self._socket_fileno = self._socket.fileno()
+        self._epoll.register(self._socket_fileno, select.EPOLLIN)
 
     def on_halt(self):
-        self._epoll.unregister(self._socket.fileno())
+        self._epoll.unregister(self._socket_fileno)
         self._epoll.close()
         self._socket.close()
         self._proc_pool.close()
 
     def on_event(self, event):
-        #_LOG.debug('Internal Event: {} targeting: {}.'.format(event.signal, event.socket_fileno))
+        _LOG.error('Internal Event: {} targeting: {}.'.format(event.signal, event.socket_fileno))
         if event.signal == READ_REQUEST:
             self._epoll.modify(event.socket_fileno, select.EPOLLIN)
         elif event.signal == WRITE_REQUEST:
@@ -313,15 +306,17 @@ class EPollServer(PersistentProcess):
         elif event.signal == CLOSE_REQUEST:
             self._epoll.modify(event.socket_fileno, select.EPOLLHUP)
             channel_info = self._active_channels[event.socket_fileno]
-            self.pipeline_dispatch(
+            self.dispatch(
                         ChannelClosedEvent(channel_info.address),
-                        channel_info)
+                        channel_info.fileno,
+                        channel_info.pipeline)
         elif event.signal == RELEASE_SOCKET:
+            _LOG.error('RELEASE {}'.format(event.socket_fileno))
             active_channel = self._active_channels.get(event.socket_fileno)
             if active_channel:
                 active_channel.state.release()
         elif event.signal == RECLAIM_SOCKET:
-            #_LOG.debug('RECLAIM {}'.format(event.socket_fileno))
+            _LOG.error('RECLAIM {}'.format(event.socket_fileno))
             self._epoll.unregister(event.socket_fileno)
             channel = self._active_channels[event.socket_fileno].channel
             channel.shutdown(socket.SHUT_RDWR)
@@ -331,45 +326,45 @@ class EPollServer(PersistentProcess):
             _LOG.error('Unknown event signal: {} passed.'.format(event.signal))
 
     def on_epoll(self, event, fileno):
-        if fileno == self._socket.fileno():
+        if fileno == self._socket_fileno:
             channel_info = self._accept()
-            self.pipeline_dispatch(
+            self.dispatch(
                 ChannelConnectedEvent(channel_info.address),
-                channel_info)
+                channel_info.fileno,
+                channel_info.pipeline)
         else:
             channel_info = self._active_channels[fileno]
 
-            if not channel_info.state.in_use():
+            if not channel_info.state.in_use():# and channel_info.state.is_interested(event):
+                channel_info.state.use(event)
+
                 if event & select.EPOLLIN:
-                    handle = ChannelHandle(channel_info.channel.fileno(), channel_info.channel.type)
-                    self.channel_dispatch(
-                        handle,
+                    handle = channel_info.new_handle()
+                    self.dispatch(
                         ChannelReadEvent(handle),
-                        channel_info)
+                        channel_info.fileno,
+                        channel_info.pipeline,
+                        handle)
                 elif event & select.EPOLLOUT:
-                    handle = ChannelHandle(channel_info.channel.fileno(), channel_info.channel.type)
-                    self.channel_dispatch(
-                        handle,
+                    handle = channel_info.new_handle()
+                    self.dispatch(
                         ChannelWriteEvent(handle),
-                        channel_info)
+                        channel_info.fileno,
+                        channel_info.pipeline,
+                        handle)
                 elif event & select.EPOLLHUP:
-                    self.pipeline_dispatch(
+                    self.dispatch(
                         ChannelClosedEvent(channel_info.address),
-                        channel_info)
+                        channel_info.fileno,
+                        channel_info.pipeline)
 
-    def channel_dispatch(self, handle, event, channel_info):
-        channel_info.state.use()
-        self._proc_pool.apply_async(func=drive_channel_event, args=(
+    def dispatch(self, event, fileno, pipeline, handle=None):
+        _LOG.debug('Dispatching {} to {} with handle {}.'.format(event, fileno, handle))
+        self._proc_pool.apply_async(func=drive_event, args=(
                 event,
-                handle,
-                channel_info.pipeline))
-
-    def pipeline_dispatch(self, event, channel_info):
-        channel_info.state.use()
-        self._proc_pool.apply_async(func=drive_pipeline_event, args=(
-                event,
-                channel_info.channel.fileno(),
-                channel_info.pipeline))
+                fileno,
+                pipeline,
+                handle))
 
     MAX_EVENTS = cpu_count()*2
     skip_epoll = False
@@ -395,18 +390,17 @@ class EPollServer(PersistentProcess):
 
     def _accept(self):
         channel, address = self._socket.accept()
-        fileno = channel.fileno()
-        _LOG.info('Connection accepted - fileno: {}'.format(fileno))
+        channel_info = ChannelDescriptor(channel, address, ChannelPipeline(self._pipeline_factory))
+        _LOG.info('Connection accepted - fileno: {}'.format(channel_info.fileno))
 
         # Set non-blocking
         channel.setblocking(0)
 
         # Register with selector and set us ready to recieve
-        self._epoll.register(fileno , select.EPOLLIN)
+        self._epoll.register(channel_info.fileno , select.EPOLLIN)
 
         # Log this connection
-        channel_info = ChannelDescriptor(channel, address, ChannelPipeline(self._pipeline_factory))
-        self._active_channels[fileno] = channel_info
+        self._active_channels[channel_info.fileno] = channel_info
         return channel_info
 
 

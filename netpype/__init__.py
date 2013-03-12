@@ -1,4 +1,6 @@
 import logging
+import cProfile
+
 from multiprocessing import Process, Value
 
 _LOG = logging.getLogger('netpype')
@@ -13,6 +15,7 @@ class PersistentProcess(object):
         self._name = name
         self._state = Value('i', self._STATE_NEW)
         kwargs['state'] = self._state
+        #self._process = Process(target=self._run_profiled, kwargs=kwargs)
         self._process = Process(target=self._run, kwargs=kwargs)
 
     def stop(self):
@@ -31,6 +34,9 @@ class PersistentProcess(object):
         self._state.value = self._STATE_NEW
         self._process.start()
         _LOG.debug('Process {} started.'.format(self._name))
+
+    def _run_profiled(self, state, **kwargs):
+        cProfile.runctx('self._run(state, **kwargs)', globals(), locals())
 
     def _run(self, state, **kwargs):
         self.on_start()
