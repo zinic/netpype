@@ -64,12 +64,14 @@ class HandlerPipelineFactory(object):
 WRITE_AVAILABLE = 0
 READ_AVAILABLE = 1
 CONNECTED = 2
+CLOSED = 3
 
 WRITE_REQUEST = 100
 READ_REQUEST = 101
 CLOSE_REQUEST = 102
 
 RELEASE_SOCKET = 200
+RECLAIM_SOCKET = 201
 
 class PipelineEvent(object):
 
@@ -95,6 +97,13 @@ class ChannelConnectedEvent(PipelineEvent):
 
     def  __init__(self, address):
         super(ChannelConnectedEvent, self).__init__(CONNECTED)
+        self.address = address
+
+
+class ChannelClosedEvent(PipelineEvent):
+
+    def  __init__(self, address):
+        super(ChannelClosedEvent, self).__init__(CLOSED)
         self.address = address
 
 
@@ -159,19 +168,13 @@ class PipelineDriverError(Exception):
 
 class ChannelHandle(object):
 
-    def __init__(self, fileno, socket_type, reduce_handle=True):
+    def __init__(self, fileno, socket_type):
         self.fileno = fileno
         self.socket_type = socket_type
-        self.has_handle = reduce_handle
         self._channel = None
-
-        if reduce_handle:
-            self._handle = reduction.reduce_handle(fileno)
+        self._handle = reduction.reduce_handle(fileno)
 
     def get_channel(self):
-        if not self.has_handle:
-            raise Exception('No handle reduced...')
-
         if not self._channel:
             self._channel_fd = reduction.rebuild_handle(self._handle)
             self._channel = socket.fromfd(self._channel_fd, self.socket_type, socket.SOCK_STREAM)
@@ -182,42 +185,6 @@ class ChannelHandle(object):
         if self._channel:
             self._channel.close()
             #self._channel_fd.close()
-
-
-def drive_event(event, channel_handle, state, pipeline):
-    _LOG.debug('Driving event: {}.'.format(event.signal))
-
-    try:
-        manager = ChannelManager(channel_handle.fileno, drive_event._queue)
-        msg_obj = event
-
-        if event.signal == READ_AVAILABLE:
-            _LOG.debug('Dispatching READ_AVAILABLE to {} downstream pipeline handlers'.format(len(pipeline.downstream)))
-            for handler in pipeline.downstream:
-                msg_obj = handler.on_read(msg_obj, manager)
-        elif event.signal == WRITE_AVAILABLE:
-            _LOG.debug('Dispatching WRITE_AVAILABLE to {} upstream pipeline handlers'.format(len(pipeline.upstream)))
-            for handler in pipeline.upstream:
-                msg_obj = handler.on_write(msg_obj, manager)
-        elif event.signal == CONNECTED:
-            _LOG.debug('Dispatching CONNECTED to {} downstream pipeline handlers'.format(len(pipeline.downstream)))
-            for handler in pipeline.downstream:
-                msg_obj = handler.on_connect(msg_obj, manager)
-        else:
-            _LOG.error('Unable to drive event: {}.'.format(event.signal))
-    except Exception as ex:
-        _LOG.exception(ex)
-        return
-    finally:
-        _LOG.debug('Channel handle closing')
-        channel_handle.close()
-        _LOG.debug('Channel handle closed')
-        drive_event._queue.put(ChannelInterestEvent(RELEASE_SOCKET, channel_handle.fileno))
-        _LOG.debug('Exited dispatch OK')
-
-
-def driver_init(queue):
-    drive_event._queue = queue
 
 
 class ChannelDescriptor(object):
@@ -247,6 +214,64 @@ class ChannelState(object):
         self._processing = False
 
 
+def drive_pipeline_event(event, fileno, state, pipeline):
+    _LOG.debug('Driving event: {}.'.format(event.signal))
+
+    try:
+        msg_obj = event
+
+        if event.signal == CONNECTED:
+            _LOG.debug('Dispatching CONNECTED to {} downstream pipeline handlers.'.format(len(pipeline.downstream)))
+            manager = ChannelManager(fileno, drive_pipeline_event._queue)
+            try:
+                for handler in pipeline.downstream:
+                    msg_obj = handler.on_connect(msg_obj, manager)
+            finally:
+                drive_pipeline_event._queue.put(ChannelInterestEvent(RELEASE_SOCKET, fileno))
+        elif event.signal == CLOSED:
+            _LOG.debug('Dispatching CLOSED to all pipeline handlers.')
+            try:
+                for handler in pipeline.downstream:
+                    next_msg = handler.on_close(msg_obj)
+            finally:
+                drive_pipeline_event._queue.put(ChannelInterestEvent(RECLAIM_SOCKET, fileno))
+        else:
+            _LOG.error('Unable to drive pipeline event: {}.'.format(event.signal))
+    except Exception as ex:
+        _LOG.exception(ex)
+    finally:
+        _LOG.debug('Exiting channel driving for event: {}.'.format(event.signal))
+
+
+def drive_channel_event(event, channel_handle, state, pipeline):
+    _LOG.debug('Driving event: {}.'.format(event.signal))
+
+    try:
+        manager = ChannelManager(channel_handle.fileno, drive_pipeline_event._queue)
+        msg_obj = event
+
+        if event.signal == READ_AVAILABLE:
+            _LOG.debug('Dispatching READ_AVAILABLE to {} downstream pipeline handlers.'.format(len(pipeline.downstream)))
+            for handler in pipeline.downstream:
+                msg_obj = handler.on_read(msg_obj, manager)
+        elif event.signal == WRITE_AVAILABLE:
+            _LOG.debug('Dispatching WRITE_AVAILABLE to {} upstream pipeline handlers.'.format(len(pipeline.upstream)))
+            for handler in pipeline.upstream:
+                msg_obj = handler.on_write(msg_obj, manager)
+        else:
+            _LOG.error('Unable to drive channel event: {}.'.format(event.signal))
+    except Exception as ex:
+        _LOG.exception(ex)
+    finally:
+        channel_handle.close()
+        drive_channel_event._queue.put(ChannelInterestEvent(RELEASE_SOCKET, channel_handle.fileno))
+        _LOG.debug('Exiting channel driving for event: {}.'.format(event.signal))
+
+def driver_init(queue):
+    drive_pipeline_event._queue = queue
+    drive_channel_event._queue = queue
+
+
 class EPollServer(PersistentProcess):
 
     _active_channels = dict()
@@ -266,7 +291,7 @@ class EPollServer(PersistentProcess):
 
     def on_start(self):
         self._event_queue = Queue()
-        self._proc_pool = Pool(processes=2, initializer=driver_init, initargs=[self._event_queue])
+        self._proc_pool = Pool(processes=cpu_count(), initializer=driver_init, initargs=[self._event_queue])
         self._socket = _new_server_socket(
             self._socket_info.socket_type,
             self._socket_info.bind_address,
@@ -286,21 +311,27 @@ class EPollServer(PersistentProcess):
         elif event.signal == WRITE_REQUEST:
             self._epoll.modify(event.socket_fileno, select.EPOLLOUT)
         elif event.signal == CLOSE_REQUEST:
-            self._epoll.unregister(event.socket_fileno)
-            self._active_channels[event.socket_fileno].channel.close()
-            del self._active_channels[event.socket_fileno]
+            self._epoll.modify(event.socket_fileno, select.EPOLLHUP)
+            channel_info = self._active_channels[event.socket_fileno]
+            self.pipeline_dispatch(
+                        ChannelClosedEvent(channel_info.address),
+                        channel_info)
         elif event.signal == RELEASE_SOCKET:
-            if event.socket_fileno in self._active_channels:
-                self._active_channels[event.socket_fileno].state.release()
+            self._active_channels[event.socket_fileno].state.release()
+        elif event.signal == RECLAIM_SOCKET:
+            self._epoll.unregister(event.socket_fileno)
+            channel = self._active_channels[event.socket_fileno].channel
+            channel.shutdown(socket.SHUT_RDWR)
+            channel.close()
+            del self._active_channels[event.socket_fileno]
         else:
             _LOG.error('Unknown event signal: {} passed.'.format(event.signal))
 
     def on_epoll(self, event, fileno):
+        _LOG.debug('On epoll')
         if fileno == self._socket.fileno():
             channel_info = self._accept()
-            handle = ChannelHandle(channel_info.channel.fileno(), channel_info.channel.type, reduce_handle=False)
-            self.dispatch(
-                handle,
+            self.pipeline_dispatch(
                 ChannelConnectedEvent(channel_info.address),
                 channel_info)
         else:
@@ -311,36 +342,50 @@ class EPollServer(PersistentProcess):
 
                 if event & select.EPOLLIN:
                     handle = ChannelHandle(channel_info.channel.fileno(), channel_info.channel.type)
-                    self.dispatch(
+                    self.channel_dispatch(
                         handle,
                         ChannelReadEvent(handle),
                         channel_info)
                 elif event & select.EPOLLOUT:
                     handle = ChannelHandle(channel_info.channel.fileno(), channel_info.channel.type)
-                    self.dispatch(
+                    self.channel_dispatch(
                         handle,
                         ChannelWriteEvent(handle),
                         channel_info)
-    #           elif event & select.EPOLLHUP:
-    #               pass, socket_type
+                elif event & select.EPOLLHUP:
+                    self.pipeline_dispatch(
+                        ChannelClosedEvent(channel_info.address),
+                        channel_info)
 
-    def dispatch(self, handle, event, channel_info):
-        _LOG.debug('Dispatching event: {}.'.format(event.signal))
+    def channel_dispatch(self, handle, event, channel_info):
+        _LOG.debug('Dispatching channel event: {}.'.format(event.signal))
         channel_info.state.use()
-        self._proc_pool.apply_async(func=drive_event, args=(
+        self._proc_pool.apply_async(func=drive_channel_event, args=(
                 event,
                 handle,
                 channel_info.state,
                 channel_info.pipeline))
 
-    def process(self, kwargs):
-        # Events take priority
-        while not self._event_queue.empty():
-            self.on_event(self._event_queue.get_nowait())
+    def pipeline_dispatch(self, event, channel_info):
+        _LOG.debug('Dispatching pipeline event: {}.'.format(event.signal))
+        channel_info.state.use()
+        self._proc_pool.apply_async(func=drive_pipeline_event, args=(
+                event,
+                channel_info.channel.fileno(),
+                channel_info.state,
+                channel_info.pipeline))
 
-        # Poll
-        for fileno, event in self._epoll.poll(1):
-            self.on_epoll(event, fileno)
+    def process(self, kwargs):
+        try:
+            # Events take priority
+            while not self._event_queue.empty():
+                self.on_event(self._event_queue.get_nowait())
+
+            # Poll
+            for fileno, event in self._epoll.poll(0.001):
+                self.on_epoll(event, fileno)
+        except Exception as ex:
+            _LOG.exception(ex)
 
     def _accept(self):
         channel, address = self._socket.accept()
@@ -364,7 +409,7 @@ class AbstractEPollHandler(object):
     def on_connect(self, event, manager):
         pass
 
-    def on_close(self, event, manager):
+    def on_close(self, event):
         pass
 
     def on_read(self, event, manager):

@@ -43,6 +43,9 @@ class BasicEPollHandler(netpype.epoll.AbstractEPollHandler):
         event.write(b'HTTP/1.1 200 OK\r\n\r\n')
         manager.request_close()
 
+    def on_close(self, event):
+        _LOG.info('Closing')
+
 
 class PipelineFactory(netpype.epoll.HandlerPipelineFactory):
 
