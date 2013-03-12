@@ -9,7 +9,7 @@ import multiprocessing
 console = logging.StreamHandler()
 
 def to_console(logger):
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.WARN)
     logger.addHandler(console)
     logger.propagate = False
 
@@ -19,13 +19,6 @@ map(to_console,
      logging.getLogger('netpype.tests.epoll_test')))
 
 _LOG = logging.getLogger('netpype.tests.epoll_test')
-
-
-def suite():
-    suite = unittest.TestSuite()
-    suite.addTest(WhenHosting())
-
-    return suite
 
 
 class BasicEPollHandler(netpype.epoll.AbstractEPollHandler):
@@ -66,4 +59,7 @@ class WhenHosting(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+        socket_info = netpype.epoll.SocketDescriptor(netpype.epoll.IPv4_SOCK, '127.0.0.1', 8080)
+        server = netpype.epoll.EPollServer(socket_info, PipelineFactory())
+        server.start()
+        time.sleep(100)
