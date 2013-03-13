@@ -1,5 +1,5 @@
 import logging
-from netpype import epoll_x as epoll
+from netpype import epoll_s as epoll
 
 from netpype.channel import *
 
@@ -10,16 +10,14 @@ class BasicEPollHandler(object):
 
     def on_connect(self, address):
         _LOG.info('Connected to {}.'.format(address))
-        return (REQUEST_READ,)
+        return (REQUEST_READ, None)
 
-    def on_read(self, channel):
-        data = channel.recv(1024)
+    def on_read(self, data):
         _LOG.info('Read {} bytes as:\n{}'.format(len(data), data))
-        return (REQUEST_WRITE,)
+        return (REQUEST_WRITE, b'HTTP/1.1 200 OK\r\n\r\n')
 
     def on_write(self, channel):
-        channel.send(b'HTTP/1.1 200 OK\r\n\r\n')
-        return (REQUEST_CLOSE,)
+        return (REQUEST_CLOSE, None)
 
     def on_close(self, address):
         _LOG.info('Closing connection to {}'.format(address))

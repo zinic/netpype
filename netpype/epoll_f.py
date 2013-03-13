@@ -170,22 +170,6 @@ def on_event(event, epoll, proc_pool, handle):
                 channel_info.handle)
 
 
-def _on_epoll(self, event, fileno):
-    _LOG.debug('EPoll event {} targeting {}.'.format(event, fileno))
-
-    if event & select.EPOLLIN:
-        self._dispatch_interest(
-            (SOCKET_NOTICE, READ_AVAILABLE, fileno),
-            channel_info.handle)
-    elif event & select.EPOLLOUT:
-        self._dispatch_interest(
-            (SOCKET_NOTICE, WRITE_AVAILABLE, fileno),
-            channel_info.handle)
-    elif event & select.EPOLLHUP:
-        self._epoll.unregister(fileno)
-        del self._active_channels[fileno]
-
-
 def drive_event(event, handle=None):
     signal = event[0]
     fileno = event[1]
@@ -194,25 +178,28 @@ def drive_event(event, handle=None):
     _LOG.debug('Driving event: {} for {}.'.format(signal, fileno))
 
     try:
-        if signal & CHANNEL_CONNECTED:
+        exit_signal = RECLAIM_CHANNEL
+
+        if signal == CHANNEL_CONNECTED:
             function = 'on_connect'
             pipeline = handler_pipeline.downstream
-        elif signal & READ_AVAILABLE:
+        elif signal == READ_AVAILABLE:
             function = 'on_read'
             pipeline = handler_pipeline.downstream
-        elif signal & WRITE_AVAILABLE:
+        elif signal == WRITE_AVAILABLE:
             function = 'on_write'
             pipeline = handler_pipeline.upstream
-        elif signal & CHANNEL_CLOSED:
+        elif signal == CHANNEL_CLOSED:
             function = 'on_close'
             pipeline = handler_pipeline.downstream
         else:
-            raise Exception('Unable to drive pipeline event: {}.'.format(signal))
+            _LOG.error('Unable to drive pipeline event: {}.'.format(signal))
 
         if handle:
             msg_obj = handle.get_channel()
         else:
-            msg_obj = None
+            # Custom arg for things like address
+            msg_obj = event[3]
 
         for handler in pipeline:
             call = getattr(handler, function)
@@ -259,37 +246,40 @@ class EPollServer(PersistentProcess):
         self._socket.close()
         self._proc_pool.close()
 
-    def _on_epoll(self, event, fileno, pipeline):
-        _LOG.debug('EPoll event {} targeting {}.'.format(event, fileno))
-
-        if fileno == self._socket_fileno:
-            self._accept()
-        elif event & select.EPOLLIN:
-            self._proc_pool.apply_async(
-                        func=on_epoll,
-                        args=(READ_AVAILABLE, fileno, channel_info.pipeline, channel_info.handle))
-        elif event & select.EPOLLOUT:
-            self._dispatch((SOCKET_NOTICE, WRITE_AVAILABLE, fileno))
-            self._proc_pool.apply_async(
-                        func=on_epoll,
-                        args=(WRITE_AVAILABLE, fileno, channel_info.pipeline, channel_info.handle))
-        elif event & select.EPOLLHUP:
-            self._dispatch((SOCKET_NOTICE, CHANNEL_CLOSED, fileno))
-            self._proc_pool.apply_async(
-                        func=on_epoll,
-                        args=(CHANNEL_CLOSED, fileno, channel_info.pipeline, channel_info.handle))
-
     def process(self, kwargs):
         try:
             # Poll
             for fileno, event in self._epoll.poll():
-                if fileno == self._socket_fileno:
-                    self._accept()
-                else:
-                    channel_info = self._active_channels.get(fileno)
-
+                self._on_epoll(event, fileno)
         except Exception as ex:
             _LOG.exception(ex)
+
+    def _dispatch_interest(self, event, handle=None):
+        self._proc_pool.apply_async(
+            func=drive_event,
+            args=(event, handle),
+            callback=self._on_event)
+
+    def _on_epoll(self, event, fileno):
+        if fileno == self._socket_fileno:
+            self._accept()
+        else:
+            channel_info = self._active_channels.get(fileno)
+
+            if channel_info:
+                _LOG.debug('EPoll event {} targeting {}.'.format(event, fileno))
+
+                if event & select.EPOLLIN:
+                    self._dispatch_interest(
+                        (SOCKET_NOTICE, READ_AVAILABLE, fileno),
+                        channel_info.handle)
+                elif event & select.EPOLLOUT:
+                    self._dispatch_interest(
+                        (SOCKET_NOTICE, WRITE_AVAILABLE, fileno),
+                        channel_info.handle)
+                elif event & select.EPOLLHUP:
+                    self._epoll.unregister(fileno)
+                    del self._active_channels[fileno]
 
     def _accept(self):
         # Gimme dat socket
@@ -298,13 +288,8 @@ class EPollServer(PersistentProcess):
         # Set non-blocking
         channel.setblocking(0)
 
-        # Distill handle
-        handle = ChannelHandle(channel.fileno(), channel.type)
+        # Distill handle`
+        channel_handle = ChannelHandle(channel.fileno(), channel.type)
 
-        # Register
-        self._epoll.register(handle.fileno(), select.EPOLLONESHOT)
-        self._active_channels[handle.fileno()] = handle
-
-        self._proc_pool.apply_async(
-                        func=on_epoll,
-                        args=(CHANNEL_CONNECTED, channel_info.handle)
+        # Log this connection
+        self._dispatch_interest((SOCKET_NOTICE, CHANNEL_CONNECTED, channel_handle, address))

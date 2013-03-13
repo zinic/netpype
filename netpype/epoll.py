@@ -17,17 +17,17 @@ _LOG = logging.getLogger('netpype.epoll')
 
 class AbstractEPollHandler(object):
 
-    def on_connect(self, event):
-        return PipelineMessage(REQUEST_CLOSE)
+    def on_connect(self, address):
+        return REQUEST_CLOSE, None
 
-    def on_close(self, event):
-        pass
+    def on_close(self, address):
+        return None
 
-    def on_read(self, event):
-        return PipelineMessage(REQUEST_CLOSE)
+    def on_read(self, channel):
+        return REQUEST_CLOSE, None
 
-    def on_write(self, event):
-        return PipelineMessage(REQUEST_CLOSE)
+    def on_write(self, channel):
+        return REQUEST_CLOSE, None
 
 
 _EPOLL_EVENTS = {
@@ -46,45 +46,55 @@ _EPOLL_EVENTS = {
 }
 
 
-def drive_event(event, fileno, handler_pipeline, handle=None):
-    _LOG.debug('Driving event: {} for {}.'.format(event.signal, fileno))
+def drive_event(event, handle=None):
+    signal = event[0]
+    fileno = event[1]
+    handler_pipeline = event[2]
+
+    _LOG.debug('Driving event: {} for {}.'.format(signal, fileno))
 
     try:
         exit_signal = RECLAIM_CHANNEL
 
-        if event.signal == CHANNEL_CONNECTED:
+        if signal == CHANNEL_CONNECTED:
             function = 'on_connect'
             pipeline = handler_pipeline.downstream
-        elif event.signal == READ_AVAILABLE:
+        elif signal == READ_AVAILABLE:
             function = 'on_read'
             pipeline = handler_pipeline.downstream
-        elif event.signal == WRITE_AVAILABLE:
+        elif signal == WRITE_AVAILABLE:
             function = 'on_write'
             pipeline = handler_pipeline.upstream
-        elif event.signal == CHANNEL_CLOSED:
+        elif signal == CHANNEL_CLOSED:
             function = 'on_close'
             pipeline = handler_pipeline.downstream
         else:
-            _LOG.error('Unable to drive pipeline event: {}.'.format(event.signal))
+            _LOG.error('Unable to drive pipeline event: {}.'.format(signal))
 
-        msg_obj = event
+        if handle:
+            msg_obj = handle.get_channel()
+        else:
+            # Custom arg for things like address
+            msg_obj = event[3]
 
         for handler in pipeline:
             call = getattr(handler, function)
-            handler_result = call(msg_obj)
+            result = call(msg_obj)
 
-            if handler_result:
-                if handler_result.signal == FORWARD:
-                    msg_obj = handler_result.payload
+            if result:
+                result_len = len(result)
+                result_signal = result[0]
+                if result_signal == FORWARD:
+                    msg_obj = result[1] if result_len > 1 else None
                 else:
-                    exit_signal = handler_result.signal
+                    exit_signal = result_signal
                     break
     except Exception as ex:
         _LOG.exception(ex)
     finally:
         if handle:
             handle.close()
-        drive_event._queue.put(ChannelInterestEvent(INTEREST_REQUEST, fileno, exit_signal))
+        drive_event._queue.put((INTEREST_REQUEST, fileno, exit_signal))
 
 
 def driver_init(queue):
@@ -110,7 +120,7 @@ class EPollServer(PersistentProcess):
 
     def on_start(self):
         self._event_queue = Queue()
-        self._proc_pool = Pool(processes=cpu_count()*2, initializer=driver_init, initargs=[self._event_queue], maxtasksperchild=10240)
+        self._proc_pool = Pool(processes=cpu_count(), initializer=driver_init, initargs=[self._event_queue])
         self._socket = new_serversocket(
             self._socket_info.socket_type,
             self._socket_info.bind_address,
@@ -125,25 +135,31 @@ class EPollServer(PersistentProcess):
         self._proc_pool.close()
 
     def on_event(self, event):
-        if event.signal == INTEREST_REQUEST:
-            _LOG.debug('Interest for {} changed to: {}.'.format(event.socket_fileno, event.interest))
+        signal = event[0]
 
-            if event.interest == REQUEST_READ:
-                self._epoll.modify(event.socket_fileno, select.EPOLLIN | select.EPOLLONESHOT)
-            elif event.interest == REQUEST_WRITE:
-                self._epoll.modify(event.socket_fileno, select.EPOLLOUT | select.EPOLLONESHOT)
-            elif event.interest == REQUEST_CLOSE:
-                channel_info = self._active_channels[event.socket_fileno]
+        if signal == INTEREST_REQUEST:
+            socket_fileno = event[1]
+            interest = event[2]
+
+            _LOG.debug('Interest for {} changed to: {}.'.format(socket_fileno, interest))
+
+            if interest == REQUEST_READ:
+                self._epoll.modify(socket_fileno, select.EPOLLIN | select.EPOLLONESHOT)
+            elif interest == REQUEST_WRITE:
+                self._epoll.modify(socket_fileno, select.EPOLLOUT | select.EPOLLONESHOT)
+            elif interest == REQUEST_CLOSE:
+                channel_info = self._active_channels[socket_fileno]
                 self.dispatch(
-                    ChannelClosedEvent(channel_info.address),
-                    channel_info.fileno,
-                    channel_info.pipeline)
-            elif event.interest == RECLAIM_CHANNEL:
-                self._epoll.unregister(event.socket_fileno)
-                channel = self._active_channels[event.socket_fileno].channel
+                    (CHANNEL_CLOSED,
+                        channel_info.fileno,
+                        channel_info.pipeline,
+                        channel_info.address))
+            elif interest == RECLAIM_CHANNEL:
+                self._epoll.unregister(socket_fileno)
+                channel = self._active_channels[socket_fileno].channel
                 channel.shutdown(socket.SHUT_RDWR)
                 channel.close()
-                del self._active_channels[event.socket_fileno]
+                del self._active_channels[socket_fileno]
 
     def on_epoll(self, event, fileno):
         _LOG.debug('EPoll event {} targeting {}.'.format(event, fileno))
@@ -151,38 +167,38 @@ class EPollServer(PersistentProcess):
         if fileno == self._socket_fileno:
             channel_info = self._accept()
             self.dispatch(
-                ChannelConnectedEvent(channel_info.address),
-                channel_info.fileno,
-                channel_info.pipeline)
+                (CHANNEL_CONNECTED,
+                    channel_info.fileno,
+                    channel_info.pipeline,
+                    channel_info.address))
         else:
             channel_info = self._active_channels[fileno]
 
             if event & select.EPOLLIN:
                 handle = channel_info.new_handle()
                 self.dispatch(
-                    ChannelReadEvent(handle),
-                    channel_info.fileno,
-                    channel_info.pipeline,
+                    (READ_AVAILABLE,
+                        channel_info.fileno,
+                        channel_info.pipeline),
                     handle)
             elif event & select.EPOLLOUT:
                 handle = channel_info.new_handle()
                 self.dispatch(
-                    ChannelWriteEvent(handle),
-                    channel_info.fileno,
-                    channel_info.pipeline,
+                    (WRITE_AVAILABLE,
+                        channel_info.fileno,
+                        channel_info.pipeline),
                     handle)
             elif event & select.EPOLLHUP:
                 self.dispatch(
-                    ChannelClosedEvent(channel_info.address),
-                    channel_info.fileno,
-                    channel_info.pipeline)
+                    (CHANNEL_CLOSED,
+                        channel_info.fileno,
+                        channel_info.pipeline,
+                        channel_info.address))
 
-    def dispatch(self, event, fileno, pipeline, handle=None):
-        self._proc_pool.apply_async(func=drive_event, args=(
-                event,
-                fileno,
-                pipeline,
-                handle))
+    def dispatch(self, event, handle=None):
+        self._proc_pool.apply_async(
+            func=drive_event,
+            args=(event, handle))
 
     def process(self, kwargs):
         try:
