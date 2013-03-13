@@ -3,7 +3,9 @@ import cProfile
 
 from multiprocessing import Process, Value
 
+
 _LOG = logging.getLogger('netpype')
+
 
 class PersistentProcess(object):
 
