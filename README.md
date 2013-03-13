@@ -1,2 +1,2 @@
 # NetPype
-## Fast Net Polling
+Fast net polling for Python pipelines.
