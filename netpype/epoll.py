@@ -2,9 +2,9 @@ import socket
 import select
 import logging
 
-from multiprocessing import Pool, cpu_count
+from billiard import Pool, cpu_count
 from netpype import PersistentProcess
-from netpype.channel import server_socket, ChannelHandler
+from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 
 
 _LOG = logging.getLogger('netpype.epoll')
@@ -63,11 +63,17 @@ def drive_event(signal, socket_fileno, handler_pipelines, data=None):
     except Exception as ex:
         _LOG.exception(ex)
 
-    if exit_signal:
+
+    if signal == CHANNEL_CLOSED:
+        return (RECLAIM_CHANNEL, socket_fileno, None)
+    elif exit_signal:
         return (exit_signal, socket_fileno, msg_obj)
     else:
         return None
 
+
+def _handle_result(result):
+    _handle_result.server.handle_result(result)
 
 class EPollServer(PersistentProcess):
 
@@ -79,6 +85,11 @@ class EPollServer(PersistentProcess):
         self._active_channels = dict()
 
     def on_start(self):
+        # Since this is in a sub-process context this should be okay
+        _handle_result.server = self
+
+        # Init everything else we need now that we're in the sub-process
+        #self._workers = Pool(processes=cpu_count())
         self._socket = server_socket(self._socket_addr)
         self._socket_fileno = self._socket.fileno()
         self._epoll = _EPOLL
@@ -93,12 +104,12 @@ class EPollServer(PersistentProcess):
         _LOG.debug('EPoll event {} targeting {}.'.format(event, fileno))
 
         if fileno == self._socket_fileno:
-            handler, address = self._accept()
+            handler = self._accept()
             self._drive_event(
                 CHANNEL_CONNECTED,
                 handler.channel.fileno(),
                 handler.pipeline,
-                address)
+                handler.client_addr)
         else:
             channel_info = self._active_channels[fileno]
 
@@ -135,12 +146,19 @@ class EPollServer(PersistentProcess):
                 self._drive_event(
                     CHANNEL_CLOSED,
                     fileno,
-                    channel_info.pipeline)
+                    channel_info.pipeline,
+                    channel_info.client_addr)
 
     def _drive_event(self, signal, fileno, pipeline, data=None):
         _LOG.debug('Driving event {} for {}.'.format(signal, fileno))
-        result = drive_event(signal, fileno, pipeline, data)
+        _handle_result(drive_event(
+            signal, fileno, pipeline, data))
+#        self._workers.apply_async(
+#            func=drive_event,
+#            args=(signal, fileno, pipeline, data),
+#            callback=_handle_result)
 
+    def handle_result(self, result):
         if result:
             result_signal = result[0]
             result_fileno = result[1]
@@ -159,16 +177,23 @@ class EPollServer(PersistentProcess):
                     self._epoll.modify(
                         result_fileno, select.EPOLLOUT | select.EPOLLONESHOT)
                 elif result_signal == REQUEST_CLOSE:
+                    channel_handler.write_buffer = None
+                    channel_handler.channel.shutdown(socket.SHUT_RDWR)
+                    self._drive_event(
+                        CHANNEL_CLOSED,
+                        result_fileno,
+                        channel_handler.pipeline,
+                        channel_handler.client_addr)
+                elif result_signal == RECLAIM_CHANNEL:
                     self._epoll.unregister(result_fileno)
                     channel = self._active_channels[result_fileno].channel
                     del self._active_channels[result_fileno]
-                    channel.shutdown(socket.SHUT_RDWR)
                     channel.close()
 
     def process(self, kwargs):
         try:
             # Poll
-            for fileno, event in self._epoll.poll(0.1):
+            for fileno, event in self._epoll.poll(0.01):
                 self._on_epoll(event, fileno)
         except Exception as ex:
             _LOG.exception(ex)
@@ -183,7 +208,7 @@ class EPollServer(PersistentProcess):
 
         # Register
         self._epoll.register(fileno, select.EPOLLONESHOT)
-        handler = ChannelHandler(
-            channel, ChannelPipeline(self._pipeline_factory))
+        handler = ChannelPipeline(
+            channel, HandlerPipeline(self._pipeline_factory), address)
         self._active_channels[fileno] = handler
-        return handler, address
+        return handler

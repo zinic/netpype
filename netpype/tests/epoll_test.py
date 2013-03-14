@@ -1,11 +1,13 @@
 import time
 import unittest
 import logging
-
-from netpype import epoll_s as epoll
-
 import multiprocessing
+
 import netpype.simple
+import netpype.epoll as epoll
+
+from netpype.channel import SocketINet4Address
+
 
 
 _LOG = logging.getLogger('netpype.tests.epoll_test')
@@ -28,8 +30,7 @@ map(to_console,
 class WhenHosting(unittest.TestCase):
 
     def test_things(self):
-        socket_info = netpype.epoll.SocketINetAddress(
-            epoll.IPv4_SOCK, '127.0.0.1', 8080)
+        socket_info = SocketINet4Address('127.0.0.1', 8080)
         server = epoll.EPollServer(
             socket_info, netpype.simple.PipelineFactory())
         server.start()
@@ -37,8 +38,9 @@ class WhenHosting(unittest.TestCase):
 
 
 def go():
-    socket_info = epoll.SocketINetAddress(epoll.IPv4_SOCK, '127.0.0.1', 8080)
-    server = epoll.EPollServer(socket_info, netpype.simple.PipelineFactory())
+    socket_info = SocketINet4Address('127.0.0.1', 8080)
+    server = epoll.EPollServer(
+        socket_info,netpype.simple.BasicPipelineFactory())
     server.start()
     time.sleep(10000)
     server.stop()

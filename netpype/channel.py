@@ -19,7 +19,7 @@ def server_socket(socket_inet_addr):
     return ssock
 
 
-class SocketINetAddress(object):
+class SocketAddress(object):
 
     def __init__(self, type, address, port):
         self.type = type
@@ -32,40 +32,133 @@ class SocketINetAddress(object):
                                         self.port)
 
 
-class PipelineFactory(object):
+class SocketINet4Address(SocketAddress):
 
-    def new_upstream_pipeline(self):
-        raise NotImplementedError
+    def __init__(self, address, port):
+        super(SocketINet4Address, self).__init__(IPv4_SOCK, address, port)
 
-    def new_downstream_pipeline(self):
-        raise NotImplementedError
+
+class SocketINet6Address(SocketAddress):
+
+    def __init__(self, address, port):
+        super(SocketINet6Address, self).__init__(IPv6_SOCK, address, port)
+
+
+class HandlerPipeline(object):
+
+    def __init__(self, pipeline_factory):
+        self.upstream = pipeline_factory.upstream_pipeline()
+        self.downstream = pipeline_factory.downstream_pipeline()
 
 
 class ChannelPipeline(object):
 
-    def __init__(self, pipeline_factory):
-        self.upstream = pipeline_factory.new_upstream_pipeline()
-        self.downstream = pipeline_factory.new_upstream_pipeline()
-
-
-class ChannelHandler(object):
-
-    def __init__(self, channel, pipeline):
+    def __init__(self, channel, pipeline, client_addr):
         self.channel = channel
+        self.client_addr = client_addr
         self.pipeline = pipeline
         self.write_buffer = b''
 
 
-class AbstractEPollHandler(object):
+"""
+A PipelineFactory is responsible for building the upstream and downstream
+handlers and organize them into an upstream pipeline and a downstream pipeline.
+New pipelines are created for new connections, meaning that each pipeline has a
+1:1 ratio with the server's sockets.
+"""
+class PipelineFactory(object):
 
-    def on_connect(self, address):
+    def upstream_pipeline(self):
+        raise NotImplementedError
+
+    def downstream_pipeline(self):
+        raise NotImplementedError
+
+
+"""
+A NetworkEventHandler is a pipeline object that will both send and recieve
+network events. Direct extension of this class is not required but recommended
+for the default return values of the pre-existing methods.
+
+When a method is called on the NetworkEventHandler, there is the expectation
+that the method will either return None or return a tuple containing an event
+signal and, if present, a message payload.
+"""
+class NetworkEventHandler(object):
+
+    """
+    A NetworkEventHandler may receive an event describing that a network client
+    has connected with the pipeline successfully. The message argument of this
+    method represents the address of the client that is now connected.
+
+    This message will be called for every handler regardless of their return
+    values.
+    """
+    def on_connect(self, message):
         return REQUEST_CLOSE, None
 
-    def on_close(self, address):
+    """
+    A NetworkEventHandler may recieve an event describing that a network client
+    has disconnected. This disconnect may happen at any time or due to an error.
+    The message argument of this method represents the address of the client
+    that was connected.
+
+    A handler may forward an event to the following handler by returning using
+    the netpype.selector.FORWARD signal. The argument is passed to the next
+    handler as its message.
+
+    A handler may request socket events. Socket events break out of the pipeline
+    and are acted upon immediately.
+
+    The following socket events are allowed:
+        * netpype.selector.REQUEST_WRITE
+        * netpype.selector.REQUEST_READ
+        * netpype.selector.REQUEST_CLOSE
+    """
+    def on_close(self, message):
         return None
 
-    def on_read(self, channel):
+    """
+    A NetworkEventHandler may recieve an event describing that a network client
+    has sent the server data. The message argument of this method represents
+    the message that was sent through the pipeline from the actor behind this
+    handler. The preceeding actor may be the source, in which case the message
+    will be a buffer containing the, otherwise the message may be of any type
+    and should be interpreted by the handler.
+
+    A handler may forward an event to the following handler by returning using
+    the netpype.selector.FORWARD signal. The argument is passed to the next
+    handler as its message.
+
+    A handler may request socket events. Socket events break out of the pipeline
+    and are acted upon immediately.
+
+    The following socket events are allowed:
+        * netpype.selector.REQUEST_WRITE
+        * netpype.selector.REQUEST_READ
+        * netpype.selector.REQUEST_CLOSE
+    """
+    def on_read(self, message):
         return REQUEST_CLOSE, None
 
-    def on_write(self, channel):
+    """
+    A NetworkEventHandler may recieve an event describing that a network client
+    has sent the server data. The message argument of this method represents
+    the message that was sent down through the pipeline from the actor ahead of
+    this handler. The last return value of the pipeline is considered the final
+    result if each handler forwards to the next.
+
+    A handler may forward an event to the following handler by returning using
+    the netpype.selector.FORWARD signal. The argument is passed to the next
+    handler as its message.
+
+    A handler may request selector events. Selector events break out of the
+    pipeline and are acted upon immediately.
+
+    The following socket events are allowed:
+        * netpype.selector.REQUEST_WRITE
+        * netpype.selector.REQUEST_READ
+        * netpype.selector.REQUEST_CLOSE
+    """
+    def on_write(self, message):
         return REQUEST_CLOSE, None
