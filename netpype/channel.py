@@ -2,8 +2,11 @@ import socket
 import select
 import logging
 
+from copy import copy
+
 
 _LOG = logging.getLogger('netpype.channel')
+_EMPTY_BUFFER = b''
 
 UNIX_SOCK = socket.AF_UNIX
 IPv4_SOCK = socket.AF_INET
@@ -57,7 +60,34 @@ class ChannelPipeline(object):
         self.channel = channel
         self.client_addr = client_addr
         self.pipeline = pipeline
-        self.write_buffer = b''
+        self.write_buffer = ChannelBuffer()
+
+
+"""
+This is a simple read buffer idiom to prevent buffer manipulation operations
+while reading data.
+"""
+class ChannelBuffer(object):
+
+    def __init__(self, initial_buffer=b''):
+        self.set_buffer(initial_buffer)
+
+    def set_buffer(self, new_buffer):
+        self._buffer = new_buffer
+        self._position = 0
+        self._size = len(new_buffer)
+
+    def size(self):
+        return self._size
+
+    def has_data(self):
+        return self._position < self._size
+
+    def remaining(self):
+        return self._buffer[self._position:]
+
+    def sent(self, bytes_read):
+        self._position += bytes_read
 
 
 """

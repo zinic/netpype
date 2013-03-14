@@ -1,8 +1,12 @@
-import logging
+import time
 import netpype.epoll as epoll
+
+from netpype.examples import get_logger
+from netpype.channel import SocketINet4Address
 from netpype.channel import NetworkEventHandler, PipelineFactory
 
-_LOG = logging.getLogger('netpype.simple')
+
+_LOG = get_logger('netpype.examples.simple')
 
 
 class BasicHandler(NetworkEventHandler):
@@ -29,3 +33,16 @@ class BasicPipelineFactory(PipelineFactory):
 
     def downstream_pipeline(self):
         return [BasicHandler()]
+
+
+def go():
+    socket_info = SocketINet4Address('127.0.0.1', 8080)
+    server = epoll.EPollServer(
+        socket_info, BasicPipelineFactory())
+    server.start()
+    time.sleep(10000)
+    server.stop()
+
+
+if __name__ == '__main__':
+    go()
