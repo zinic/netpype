@@ -58,6 +58,7 @@ class ChannelPipeline(object):
 
     def __init__(self, channel, pipeline, client_addr):
         self.channel = channel
+        self.fileno = channel.fileno()
         self.client_addr = client_addr
         self.pipeline = pipeline
         self.write_buffer = ChannelBuffer()
