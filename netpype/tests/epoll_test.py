@@ -35,6 +35,7 @@ class WhenHosting(unittest.TestCase):
             socket_info, netpype.simple.PipelineFactory())
         server.start()
         time.sleep(100)
+        server.stop()
 
 
 def go():
