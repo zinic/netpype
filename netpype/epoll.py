@@ -12,17 +12,18 @@ _EPOLL = select.epoll()
 _EMPTY_BUFFER = b''
 
 # Event signals
-SOCKET_NOTICE = 0
 WRITE_AVAILABLE = 1
 READ_AVAILABLE = 2
 CHANNEL_CONNECTED = 3
 CHANNEL_CLOSED = 4
-INTEREST_REQUEST = 5
-RECLAIM_CHANNEL = 6
+RECLAIM_CHANNEL = 5
+
+# Pipline events
 REQUEST_WRITE = 100
 REQUEST_READ = 101
 REQUEST_CLOSE = 102
 FORWARD = 103
+DISPATCH = 104
 
 
 def drive_event(signal, socket_fileno, handler_pipelines, data=None):
@@ -71,9 +72,10 @@ def drive_event(signal, socket_fileno, handler_pipelines, data=None):
     else:
         return None
 
-
-def _handle_result(result):
-    _handle_result.server.handle_result(result)
+#        self._workers.apply_async(
+#            func=drive_event,
+#            args=(signal, fileno, pipeline, data),
+#            callback=_handle_result)
 
 class EPollServer(PersistentProcess):
 
@@ -85,11 +87,8 @@ class EPollServer(PersistentProcess):
         self._active_channels = dict()
 
     def on_start(self):
-        # Since this is in a sub-process context this should be okay
-        _handle_result.server = self
-
         # Init everything else we need now that we're in the sub-process
-        #self._workers = Pool(processes=cpu_count())
+        self._workers = Pool(processes=cpu_count())
         self._socket = server_socket(self._socket_addr)
         self._socket_fileno = self._socket.fileno()
         self._epoll = _EPOLL
@@ -121,27 +120,20 @@ class EPollServer(PersistentProcess):
                     channel_info.pipeline,
                     read)
             elif event & select.EPOLLOUT:
-                if channel_info.write_buffer:
-                    buffer_size = len(channel_info.write_buffer)
-                else:
-                    buffer_size = 0
-
-                if buffer_size > 0:
-                    sent = channel_info.channel.send(channel_info.write_buffer)
-                    if sent < buffer_size:
-                        next_chunk = channel_info.write_buffer[sent:]
-                        channel_info.write_buffer = next_chunk
+                write_buffer = channel_info.write_buffer
+                if write_buffer:
+                    if write_buffer.has_data():
+                        write_buffer.sent(channel_info.channel.send(write_buffer.remaining()))
+                        if not write_buffer.has_data():
+                            self._drive_event(
+                                WRITE_AVAILABLE,
+                                fileno,
+                                channel_info.pipeline)
                     else:
-                        channel_info.write_buffer = b''
                         self._drive_event(
                             WRITE_AVAILABLE,
                             fileno,
                             channel_info.pipeline)
-                else:
-                    self._drive_event(
-                        WRITE_AVAILABLE,
-                        fileno,
-                        channel_info.pipeline)
             elif event & select.EPOLLHUP:
                 self._drive_event(
                     CHANNEL_CLOSED,
@@ -151,12 +143,8 @@ class EPollServer(PersistentProcess):
 
     def _drive_event(self, signal, fileno, pipeline, data=None):
         _LOG.debug('Driving event {} for {}.'.format(signal, fileno))
-        _handle_result(drive_event(
+        self.handle_result(drive_event(
             signal, fileno, pipeline, data))
-#        self._workers.apply_async(
-#            func=drive_event,
-#            args=(signal, fileno, pipeline, data),
-#            callback=_handle_result)
 
     def handle_result(self, result):
         if result:
@@ -171,11 +159,11 @@ class EPollServer(PersistentProcess):
 
                 if result_signal == REQUEST_READ:
                     self._epoll.modify(
-                        result_fileno, select.EPOLLIN | select.EPOLLONESHOT)
+                        result_fileno, select.EPOLLIN)
                 elif result_signal == REQUEST_WRITE:
-                    channel_handler.write_buffer = result[2]
+                    channel_handler.write_buffer.set_buffer(result[2])
                     self._epoll.modify(
-                        result_fileno, select.EPOLLOUT | select.EPOLLONESHOT)
+                        result_fileno, select.EPOLLOUT)
                 elif result_signal == REQUEST_CLOSE:
                     channel_handler.write_buffer = None
                     channel_handler.channel.shutdown(socket.SHUT_RDWR)
