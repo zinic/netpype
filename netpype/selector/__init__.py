@@ -12,6 +12,7 @@ _LOG = logging.getLogger('netpype.selector.server')
 def new_server(socket_addr, pipeline_factory):
     if sys.platform == "linux2" and getattr(select, 'epoll'):
         return EPollSelectorServer(socket_addr, pipeline_factory)
+        #pass
     elif sys.platform == 'darwin':
         pass
     elif sys.platform == 'win32' or sys.platform == 'cygwin':

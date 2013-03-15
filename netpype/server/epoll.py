@@ -86,6 +86,5 @@ class EPollSelectorServer(SelectorServer):
     def _write_requested(self, fileno):
         self._epoll.modify(fileno, select.EPOLLOUT)
 
-    def _channel_closed(self, channel):
-        channel.shutdown(socket.SHUT_RDWR)
-        self._epoll.unregister(channel.fileno())
+    def _channel_closed(self, fileno):
+        self._epoll.unregister(fileno)
