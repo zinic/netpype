@@ -8,8 +8,8 @@ from netpype.channel import NetworkEventHandler, PipelineFactory
 
 
 _LOG = get_logger('netpype.examples.simple')
-
 _EOF = '\r\n'
+
 
 class BasicHandler(NetworkEventHandler):
 
