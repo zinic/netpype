@@ -48,37 +48,37 @@ class EPollSelectorServer(SelectorServer):
                 handler.pipeline,
                 handler.client_addr)
         else:
-            channel_info = self._active_channels[fileno]
+            channel_handler = self._active_channels[fileno]
 
             if event & select.EPOLLIN or event & select.EPOLLPRI:
-                read = channel_info.channel.recv(1024)
+                read = channel_handler.channel.recv(1024)
                 self._network_event(
                     selection_events.READ_AVAILABLE,
                     fileno,
-                    channel_info.pipeline,
+                    channel_handler.pipeline,
                     read)
             elif event & select.EPOLLOUT:
-                write_buffer = channel_info.write_buffer
+                write_buffer = channel_handler.write_buffer
                 if write_buffer:
                     if write_buffer.has_data():
-                        write_buffer.sent(channel_info.channel.send(
+                        write_buffer.sent(channel_handler.channel.send(
                             write_buffer.remaining()))
                         if not write_buffer.has_data():
                             self._network_event(
                                 selection_events.WRITE_AVAILABLE,
                                 fileno,
-                                channel_info.pipeline)
+                                channel_handler.pipeline)
                     else:
                         self._network_event(
                             selection_events.WRITE_AVAILABLE,
                             fileno,
-                            channel_info.pipeline)
+                            channel_handler.pipeline)
             elif event & select.EPOLLHUP:
                 self._network_event(
                     selection_events.CHANNEL_CLOSED,
                     fileno,
-                    channel_info.pipeline,
-                    channel_info.client_addr)
+                    channel_handler.pipeline,
+                    channel_handler.client_addr)
 
     def _read_requested(self, fileno):
         self._epoll.modify(fileno, select.EPOLLIN)
@@ -88,7 +88,7 @@ class EPollSelectorServer(SelectorServer):
 
     def _channel_closed(self, channel):
         channel.shutdown(socket.SHUT_RDWR)
-        self._epoll.unregister(channel_handler.fileno)
+        self._epoll.unregister(channel.fileno())
         self._network_event(
             selection_events.CHANNEL_CLOSED,
             channel_handler.fileno,
