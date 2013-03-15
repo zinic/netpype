@@ -22,12 +22,15 @@ setup(
     description = '',
     author = 'John Hopper',
     author_email = '',
-    install_requires = [
-        "librabbitmq",
-        "kombu",
-        "mock"
+    tests_require = [
+        "mock",
+        "nose",
     ],
-    test_suite = 'queuet.tests',
+    install_requires = [
+        "billiard",
+        "cython",
+    ],
+    test_suite = 'nose.collector',
     zip_safe = False,
     include_package_data = True,
     packages = find_packages(exclude=['ez_setup'])
