@@ -1,5 +1,5 @@
 import logging
-#import cProfile
+import cProfile
 
 from multiprocessing import Process, Value
 
@@ -17,6 +17,8 @@ class PersistentProcess(object):
         self._state = Value('i', _STATE_NEW)
         self._process = Process(
             target=self._run, kwargs={'state': self._state})
+#        self._process = Process(
+#            target=self._run_profiled, kwargs={'state': self._state})
 
     def stop(self):
         self._state.value = _STATE_STOPPED
@@ -28,6 +30,9 @@ class PersistentProcess(object):
 
         self._state.value = _STATE_NEW
         self._process.start()
+
+    def _run_profiled(self, state):
+        cProfile.runctx('self._run(state)', globals(), locals())
 
     def _run(self, state):
         self.on_start()

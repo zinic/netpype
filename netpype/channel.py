@@ -16,9 +16,10 @@ IPv6_SOCK = socket.AF_INET6
 def server_socket(socket_inet_addr):
     ssock = socket.socket(socket_inet_addr.type, socket.SOCK_STREAM)
     ssock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    ssock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     ssock.bind((socket_inet_addr.address, socket_inet_addr.port))
     ssock.setblocking(0)
-    ssock.listen(1)
+    ssock.listen(100)
     return ssock
 
 
