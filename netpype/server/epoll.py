@@ -89,8 +89,3 @@ class EPollSelectorServer(SelectorServer):
     def _channel_closed(self, channel):
         channel.shutdown(socket.SHUT_RDWR)
         self._epoll.unregister(channel.fileno())
-        self._network_event(
-            selection_events.CHANNEL_CLOSED,
-            channel_handler.fileno,
-            channel_handler.pipeline,
-            channel_handler.client_addr)

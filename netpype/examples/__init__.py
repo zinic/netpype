@@ -4,7 +4,7 @@ import logging
 _CONSOLE_STREAM = logging.StreamHandler()
 
 
-def get_logger(logger_name, level=logging.WARN, propagate=False):
+def get_logger(logger_name, level=logging.DEBUG, propagate=False):
     logger = logging.getLogger(logger_name)
     logger.setLevel(level)
     logger.propagate = propagate

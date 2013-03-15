@@ -127,6 +127,11 @@ class SelectorServer(PersistentProcess):
             elif result_signal == selection_events.REQUEST_CLOSE:
                 channel_handler.write_buffer = None
                 self._channel_closed(channel_handler.channel)
+                self._network_event(
+                    selection_events.CHANNEL_CLOSED,
+                    channel_handler.fileno,
+                    channel_handler.pipeline,
+                    channel_handler.client_addr)
             elif result_signal == selection_events.RECLAIM_CHANNEL:
                 channel = self._active_channels[result_fileno].channel
                 del self._active_channels[result_fileno]
