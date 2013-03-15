@@ -43,7 +43,7 @@ class PollSelectorServer(SelectorServer):
             handler = self._accept(self._socket, self._pipeline_factory)
             self._poll.register(handler.fileno)
             self._active_channels[handler.fileno] = handler
-            self._drive_event(
+            self._network_event(
                 selection_events.CHANNEL_CONNECTED,
                 handler.fileno,
                 handler.pipeline,
@@ -53,7 +53,7 @@ class PollSelectorServer(SelectorServer):
 
             if event & select.POLLIN or event & select.POLLPRI:
                 read = channel_info.channel.recv(1024)
-                self._drive_event(
+                self._network_event(
                     selection_events.READ_AVAILABLE,
                     fileno,
                     channel_info.pipeline,
@@ -65,53 +65,54 @@ class PollSelectorServer(SelectorServer):
                         write_buffer.sent(channel_info.channel.send(
                             write_buffer.remaining()))
                         if not write_buffer.has_data():
-                            self._drive_event(
+                            self._network_event(
                                 selection_events.WRITE_AVAILABLE,
                                 fileno,
                                 channel_info.pipeline)
                     else:
-                        self._drive_event(
+                        self._network_event(
                             selection_events.WRITE_AVAILABLE,
                             fileno,
                             channel_info.pipeline)
             elif event & select.POLLHUP:
-                self._drive_event(
+                self._network_event(
                     selection_events.CHANNEL_CLOSED,
                     fileno,
                     channel_info.pipeline,
                     channel_info.client_addr)
 
     def _handle_result(self, result):
-        if result:
-            result_signal = result[0]
-            result_fileno = result[1]
+        result_signal = result[0]
+        result_fileno = result[1]
 
-            channel_handler = self._active_channels[result_fileno]
+        channel_handler = self._active_channels[result_fileno]
 
-            if channel_handler:
-                _LOG.debug('Driving result {} for {}.'.format(
-                    result_signal, result_fileno))
+        if channel_handler:
+            _LOG.debug('Driving result {} for {}.'.format(
+                result_signal, result_fileno))
 
-                if result_signal == selection_events.REQUEST_READ:
-                    self._poll.modify(
-                        result_fileno, select.EPOLLIN)
-                elif result_signal == selection_events.REQUEST_WRITE:
-                    channel_handler.write_buffer.set_buffer(result[2])
-                    self._poll.modify(
-                        result_fileno, select.EPOLLOUT)
-                elif result_signal == selection_events.REQUEST_CLOSE:
-                    channel_handler.write_buffer = None
-                    channel_handler.channel.shutdown(socket.SHUT_RDWR)
-                    self._drive_event(
-                        selection_events.CHANNEL_CLOSED,
-                        result_fileno,
-                        channel_handler.pipeline,
-                        channel_handler.client_addr)
-                elif result_signal == selection_events.RECLAIM_CHANNEL:
-                    self._poll.unregister(result_fileno)
-                    channel = self._active_channels[result_fileno].channel
-                    del self._active_channels[result_fileno]
-                    channel.close()
-                else:
-                    _LOG.error('Unrecognized event: {} passed.'.format(
-                        result_signal))
+            if result_signal == selection_events.REQUEST_READ:
+                self._poll.modify(
+                    result_fileno, select.EPOLLIN)
+            elif result_signal == selection_events.REQUEST_WRITE:
+                channel_handler.write_buffer.set_buffer(result[2])
+                self._poll.modify(
+                    result_fileno, select.EPOLLOUT)
+            elif result_signal == selection_events.DISPATCH:
+                self.dispatch((channel_handler.address, result[2]))
+            elif result_signal == selection_events.REQUEST_CLOSE:
+                channel_handler.write_buffer = None
+                channel_handler.channel.shutdown(socket.SHUT_RDWR)
+                self._network_event(
+                    selection_events.CHANNEL_CLOSED,
+                    result_fileno,
+                    channel_handler.pipeline,
+                    channel_handler.client_addr)
+            elif result_signal == selection_events.RECLAIM_CHANNEL:
+                self._poll.unregister(result_fileno)
+                channel = self._active_channels[result_fileno].channel
+                del self._active_channels[result_fileno]
+                channel.close()
+            else:
+                _LOG.error('Unrecognized event: {} passed.'.format(
+                    result_signal))

@@ -113,7 +113,9 @@ for the default return values of the pre-existing methods.
 
 When a method is called on the NetworkEventHandler, there is the expectation
 that the method will either return None or return a tuple containing an event
-signal and, if present, a message payload.
+signal and, if present, a message payload. There is also the expectation that
+the evente methods will return in a timely fashion, otherwise the handler risks
+holding up the I/O polling loop.
 """
 class NetworkEventHandler(object):
 
