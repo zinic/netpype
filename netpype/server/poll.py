@@ -87,6 +87,5 @@ class PollSelectorServer(SelectorServer):
     def _write_requested(self, fileno):
         self._poll.modify(fileno, select.POLLOUT)
 
-    def _channel_closed(self, channel):
-        channel.shutdown(socket.SHUT_RDWR)
-        self._poll.unregister(channel.fileno())
+    def _channel_closed(self, fileno):
+        self._poll.unregister(fileno)

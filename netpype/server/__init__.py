@@ -9,6 +9,7 @@ from netpype.selector import events as selection_events
 
 
 _LOG = logging.getLogger('netpype.server')
+_EMPTY_BUFFER = b''
 
 
 try:
@@ -89,9 +90,12 @@ class SelectorServer(PersistentProcess):
 
     def _network_event(self, signal, fileno, pipeline, data=None):
         _LOG.debug('Driving event {} for {}.'.format(signal, fileno))
-        result = network_event(signal, fileno, pipeline, data)
-        if result:
-            self._handle_result(result)
+        try:
+            result = network_event(signal, fileno, pipeline, data)
+            if result:
+                self._handle_result(result)
+        except IOError as ioe:
+            self._handle_result
 
     def _accept(self, socket, pipeline_factory):
         # Gimme dat socket
@@ -111,34 +115,40 @@ class SelectorServer(PersistentProcess):
         result_signal = result[0]
         result_fileno = result[1]
 
-        channel_handler = self._active_channels[result_fileno]
+        _LOG.debug('Driving result {} for {}.'.format(
+            result_signal, result_fileno))
 
-        if channel_handler:
-            _LOG.debug('Driving result {} for {}.'.format(
-                result_signal, result_fileno))
+        channel_handler = self._active_channels.get(result_fileno)
+        if result_signal == selection_events.REQUEST_READ:
+            self._read_requested(result_fileno)
+        elif result_signal == selection_events.REQUEST_WRITE:
+            channel_handler.write_buffer.set_buffer(result[2])
+            self._write_requested(result_fileno)
+        elif result_signal == selection_events.DISPATCH:
+            self.dispatch((channel_handler.address, result[2]))
+        elif result_signal == selection_events.REQUEST_CLOSE:
+            channel_handler.write_buffer.set_buffer(_EMPTY_BUFFER)
 
-            if result_signal == selection_events.REQUEST_READ:
-                self._read_requested(result_fileno)
-            elif result_signal == selection_events.REQUEST_WRITE:
-                channel_handler.write_buffer.set_buffer(result[2])
-                self._write_requested(result_fileno)
-            elif result_signal == selection_events.DISPATCH:
-                self.dispatch((channel_handler.address, result[2]))
-            elif result_signal == selection_events.REQUEST_CLOSE:
-                channel_handler.write_buffer = None
-                self._channel_closed(channel_handler.channel)
-                self._network_event(
-                    selection_events.CHANNEL_CLOSED,
-                    channel_handler.fileno,
-                    channel_handler.pipeline,
-                    channel_handler.client_addr)
-            elif result_signal == selection_events.RECLAIM_CHANNEL:
-                channel = self._active_channels[result_fileno].channel
-                del self._active_channels[result_fileno]
-                channel.close()
-            else:
-                _LOG.debug('Unrecognized event: {} passed.'.format(
-                    result_signal))
+            # Try to gracefully start the closing process for the socket
+            try:
+                channel_handler.channel.shutdown(socket.SHUT_RDWR)
+            except IOError:
+                pass
+
+            self._channel_closed(result_fileno)
+            self._network_event(
+                selection_events.CHANNEL_CLOSED,
+                channel_handler.fileno,
+                channel_handler.pipeline,
+                channel_handler.client_addr)
+        elif result_signal == selection_events.RECLAIM_CHANNEL:
+            del self._active_channels[result_fileno]
+            try:
+                channel_handler.channel.close()
+            except IOError:
+                pass
+        else:
+            _LOG.debug('Unrecognized event: {} passed.'.format(result_signal))
 
     def process(self):
         raise NotImplementedError
@@ -149,5 +159,5 @@ class SelectorServer(PersistentProcess):
     def _write_requested(self, fileno, data):
         raise NotImplementedError
 
-    def _channel_closed(self, channel):
+    def _channel_closed(self, fileno):
         raise NotImplementedError
