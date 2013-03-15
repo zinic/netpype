@@ -1,7 +1,5 @@
 import time
 
-from netpype.examples import get_logger
-
 from netpype.selector import events as selection_events, new_server
 from netpype.channel import SocketINet4Address
 from netpype.channel import NetworkEventHandler, PipelineFactory
