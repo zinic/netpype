@@ -53,7 +53,7 @@ def pipeline_dispatch(function, socket_fileno, pipeline, data):
 
     try:
         for handler in pipeline:
-            result = getattr(handler, function)(msg_obj)\
+            result = getattr(handler, function)(msg_obj)
             if result:
                 exit_signal = result[0]
                 msg_obj = result[1]
@@ -107,8 +107,41 @@ class SelectorServer(PersistentProcess):
             HandlerPipeline(pipeline_factory),
             address)
 
-    def _handle_result(self, event):
-        raise NotImplementedError
+    def _handle_result(self, result):
+        result_signal = result[0]
+        result_fileno = result[1]
+
+        channel_handler = self._active_channels[result_fileno]
+
+        if channel_handler:
+            _LOG.debug('Driving result {} for {}.'.format(
+                result_signal, result_fileno))
+
+            if result_signal == selection_events.REQUEST_READ:
+                self._read_requested(result_fileno)
+            elif result_signal == selection_events.REQUEST_WRITE:
+                channel_handler.write_buffer.set_buffer(result[2])
+                self._write_requested(result_fileno)
+            elif result_signal == selection_events.DISPATCH:
+                self.dispatch((channel_handler.address, result[2]))
+            elif result_signal == selection_events.REQUEST_CLOSE:
+                self._channel_closed(channel_handler)
+            elif result_signal == selection_events.RECLAIM_CHANNEL:
+                channel = self._active_channels[result_fileno].channel
+                del self._active_channels[result_fileno]
+                channel.close()
+            else:
+                _LOG.debug('Unrecognized event: {} passed.'.format(
+                    result_signal))
 
     def process(self):
+        raise NotImplementedError
+
+    def _read_requested(self, fileno):
+        raise NotImplementedError
+
+    def _write_requested(self, fileno, data):
+        raise NotImplementedError
+
+    def _channel_closed(self, channel_handler):
         raise NotImplementedError

@@ -81,38 +81,18 @@ class PollSelectorServer(SelectorServer):
                     channel_info.pipeline,
                     channel_info.client_addr)
 
-    def _handle_result(self, result):
-        result_signal = result[0]
-        result_fileno = result[1]
+    def _read_requested(self, fileno):
+        self._epoll.modify(fileno, select.POLLIN)
 
-        channel_handler = self._active_channels[result_fileno]
+    def _write_requested(self, fileno):
+        self._epoll.modify(fileno, select.POLLOUT)
 
-        if channel_handler:
-            _LOG.debug('Driving result {} for {}.'.format(
-                result_signal, result_fileno))
-
-            if result_signal == selection_events.REQUEST_READ:
-                self._poll.modify(
-                    result_fileno, select.EPOLLIN)
-            elif result_signal == selection_events.REQUEST_WRITE:
-                channel_handler.write_buffer.set_buffer(result[2])
-                self._poll.modify(
-                    result_fileno, select.EPOLLOUT)
-            elif result_signal == selection_events.DISPATCH:
-                self.dispatch((channel_handler.address, result[2]))
-            elif result_signal == selection_events.REQUEST_CLOSE:
-                channel_handler.write_buffer = None
-                channel_handler.channel.shutdown(socket.SHUT_RDWR)
-                self._network_event(
-                    selection_events.CHANNEL_CLOSED,
-                    result_fileno,
-                    channel_handler.pipeline,
-                    channel_handler.client_addr)
-            elif result_signal == selection_events.RECLAIM_CHANNEL:
-                self._poll.unregister(result_fileno)
-                channel = self._active_channels[result_fileno].channel
-                del self._active_channels[result_fileno]
-                channel.close()
-            else:
-                _LOG.error('Unrecognized event: {} passed.'.format(
-                    result_signal))
+    def _channel_closed(self, channel_handler):
+        channel_handler.write_buffer = None
+        channel_handler.channel.shutdown(socket.SHUT_RDWR)
+        self._epoll.unregister(channel_handler.fileno)
+        self._network_event(
+            selection_events.CHANNEL_CLOSED,
+            channel_handler.fileno,
+            channel_handler.pipeline,
+            channel_handler.client_addr)
