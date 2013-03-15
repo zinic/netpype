@@ -52,16 +52,23 @@ class PollSelectorServer(SelectorServer):
             channel_handler = self._active_channels[fileno]
 
             if event & select.POLLIN or event & select.POLLPRI:
-                read = channel_handler.channel.recv(1024)
-                self._network_event(
-                    selection_events.READ_AVAILABLE,
-                    fileno,
-                    channel_handler.pipeline,
-                    read)
+                try:
+                    read = channel_handler.channel.recv(1024)
+                    self._network_event(
+                        selection_events.READ_AVAILABLE,
+                        fileno,
+                        channel_handler.pipeline,
+                        read)
+                except IOError:
+                    self._network_event(
+                        selection_events.CHANNEL_CLOSED,
+                        channel_handler.fileno,
+                        channel_handler.pipeline,
+                        channel_handler.client_addr)
             elif event & select.POLLOUT:
                 write_buffer = channel_handler.write_buffer
-                if write_buffer:
-                    if write_buffer.has_data():
+                if write_buffer.has_data():
+                    try:
                         write_buffer.sent(channel_handler.channel.send(
                             write_buffer.remaining()))
                         if not write_buffer.has_data():
@@ -69,11 +76,17 @@ class PollSelectorServer(SelectorServer):
                                 selection_events.WRITE_AVAILABLE,
                                 fileno,
                                 channel_handler.pipeline)
-                    else:
+                    except IOError:
                         self._network_event(
-                            selection_events.WRITE_AVAILABLE,
-                            fileno,
-                            channel_handler.pipeline)
+                            selection_events.CHANNEL_CLOSED,
+                            channel_handler.fileno,
+                            channel_handler.pipeline,
+                            channel_handler.client_addr)
+                else:
+                    self._network_event(
+                        selection_events.WRITE_AVAILABLE,
+                        fileno,
+                        channel_handler.pipeline)
             elif event & select.POLLHUP:
                 self._network_event(
                     selection_events.CHANNEL_CLOSED,
