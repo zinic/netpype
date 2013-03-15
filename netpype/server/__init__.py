@@ -125,7 +125,8 @@ class SelectorServer(PersistentProcess):
             elif result_signal == selection_events.DISPATCH:
                 self.dispatch((channel_handler.address, result[2]))
             elif result_signal == selection_events.REQUEST_CLOSE:
-                self._channel_closed(channel_handler)
+                channel_handler.write_buffer = None
+                self._channel_closed(channel_handler.channel)
             elif result_signal == selection_events.RECLAIM_CHANNEL:
                 channel = self._active_channels[result_fileno].channel
                 del self._active_channels[result_fileno]
@@ -143,5 +144,5 @@ class SelectorServer(PersistentProcess):
     def _write_requested(self, fileno, data):
         raise NotImplementedError
 
-    def _channel_closed(self, channel_handler):
+    def _channel_closed(self, channel):
         raise NotImplementedError
