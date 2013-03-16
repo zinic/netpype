@@ -23,21 +23,17 @@ class EPollSelectorServer(SelectorServer):
         self._epoll.register(self._socket_fileno, select.EPOLLIN)
 
     def on_halt(self):
-        self._epoll.unregister(self._socket_fileno)
-        self._epoll.close()
+        if hasattr(self, '_epoll'):
+            self._epoll.unregister(self._socket_fileno)
+            self._epoll.close()
         super(EPollSelectorServer, self).on_halt()
 
-    def process(self):
-        try:
-            # Poll
-            for fileno, event in self._epoll.poll():
-                self._on_epoll(event, fileno)
-        except Exception as ex:
-            _LOG.exception(ex)
+    def _poll(self):
+        # Poll
+        for fileno, event in self._epoll.poll():
+            self._on_epoll(event, fileno)
 
     def _on_epoll(self, event, fileno):
-        _LOG.debug('EPoll event {} targeting {}.'.format(event, fileno))
-
         if fileno == self._socket_fileno:
             handler = self._accept(self._socket, self._pipeline_factory)
             self._epoll.register(handler.fileno)

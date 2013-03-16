@@ -2,7 +2,6 @@ import socket
 import select
 import logging
 
-#from billiard import Pool, cpu_count
 from netpype import PersistentProcess
 from netpype.server import SelectorServer
 from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
@@ -28,17 +27,12 @@ class PollSelectorServer(SelectorServer):
         self._poll.close()
         super(PollSelectorServer, self).on_halt()
 
-    def process(self):
-        try:
-            # Poll
-            for fileno, event in self._poll.poll():
-                self._on_poll(event, fileno)
-        except Exception as ex:
-            _LOG.exception(ex)
+    def _poll(self):
+        # Poll
+        for fileno, event in self._epoll.poll():
+            self._on_epoll(event, fileno)
 
     def _on_poll(self, event, fileno):
-        _LOG.debug('Poll event {} targeting {}.'.format(event, fileno))
-
         if fileno == self._socket_fileno:
             handler = self._accept(self._socket, self._pipeline_factory)
             self._poll.register(handler.fileno)

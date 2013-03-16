@@ -6,7 +6,7 @@ from netpype.server.poll import PollSelectorServer
 from netpype.server.epoll import EPollSelectorServer
 
 
-_LOG = logging.getLogger('netpype.selector.server')
+_LOG = logging.getLogger('netpype.selector')
 
 
 def new_server(socket_addr, pipeline_factory):
