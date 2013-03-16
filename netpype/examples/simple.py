@@ -1,13 +1,12 @@
 import time
-import logging
+import netpype.env as env
 
-from netpype.env import get_logger
 from netpype.selector import events as selection_events, new_server
 from netpype.channel import SocketINet4Address
 from netpype.channel import NetworkEventHandler, PipelineFactory
 
 
-_LOG = get_logger('netpype.examples.simple')
+_LOG = env.get_logger('netpype.examples.simple')
 _EOF = '\r\n'
 
 
@@ -18,7 +17,6 @@ class BasicHandler(NetworkEventHandler):
         return (selection_events.REQUEST_READ, None)
 
     def on_read(self, message):
-        _LOG.info('Read {} bytes as:\n{}'.format(len(message), message))
         return (selection_events.REQUEST_WRITE, b'HTTP/1.1 200 OK\r\n\r\n')
 
     def on_write(self, message):

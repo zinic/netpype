@@ -1,11 +1,9 @@
 import socket
 import select
-import logging
-
-from copy import copy
+import netpype.env as env
 
 
-_LOG = logging.getLogger('netpype.channel')
+_LOG = env.get_logger('netpype.channel')
 _EMPTY_BUFFER = b''
 
 UNIX_SOCK = socket.AF_UNIX
@@ -31,9 +29,7 @@ class SocketAddress(object):
         self.port = port
 
     def __repr__(self):
-        return '{} socket {}:{}'.format(self.type,
-                                        self.address,
-                                        self.port)
+        return '{} socket {}:{}'.format(self.type, self.address, self.port)
 
 
 class SocketINet4Address(SocketAddress):
@@ -82,8 +78,8 @@ class ChannelBuffer(object):
     def size(self):
         return self._size
 
-    def has_data(self):
-        return self._position < self._size
+    def empty(self):
+        return self._position >= self._size
 
     def remaining(self):
         return self._buffer[self._position:]

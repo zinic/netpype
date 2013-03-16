@@ -1,6 +1,6 @@
 import socket
 import select
-import logging
+import netpype.env as env
 
 from netpype import PersistentProcess
 from netpype.server import SelectorServer
@@ -8,7 +8,7 @@ from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 from netpype.selector import events as selection_events
 
 
-_LOG = logging.getLogger('netpype.server.epoll')
+_LOG = env.get_logger('netpype.server.epoll')
 
 
 class EPollSelectorServer(SelectorServer):
@@ -49,6 +49,8 @@ class EPollSelectorServer(SelectorServer):
             if event & select.EPOLLIN or event & select.EPOLLPRI:
                 try:
                     read = channel_handler.channel.recv(1024)
+                    if len(read) == 0:
+                        raise IOError()
                     self._network_event(
                         selection_events.READ_AVAILABLE,
                         fileno,
@@ -62,22 +64,17 @@ class EPollSelectorServer(SelectorServer):
                         channel_handler.client_addr)
             elif event & select.EPOLLOUT:
                 write_buffer = channel_handler.write_buffer
-                if write_buffer.has_data():
+                if not write_buffer.empty():
                     try:
                         write_buffer.sent(channel_handler.channel.send(
                             write_buffer.remaining()))
-                        if not write_buffer.has_data():
-                            self._network_event(
-                                selection_events.WRITE_AVAILABLE,
-                                fileno,
-                                channel_handler.pipeline)
                     except IOError:
                         self._network_event(
                             selection_events.CHANNEL_CLOSED,
                             channel_handler.fileno,
                             channel_handler.pipeline,
                             channel_handler.client_addr)
-                else:
+                if write_buffer.empty():
                     self._network_event(
                         selection_events.WRITE_AVAILABLE,
                         fileno,

@@ -1,12 +1,11 @@
 import signal
 import sys
-import logging
+import netpype.env as env
 
-from netpype.env import get_env
 from multiprocessing import Process, Value
 
-_LOG = logging.getLogger('netpype')
-_PROFILE_ENABLED = get_env('PROFILE', False)
+_LOG = env.get_logger('netpype')
+_PROFILE_ENABLED = env.get('PROFILE', False)
 
 # Enable profiling
 if _PROFILE_ENABLED:

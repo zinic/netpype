@@ -1,8 +1,7 @@
 import socket
 import select
-import logging
-import sys
 import errno
+import netpype.env as env
 
 from netpype import PersistentProcess
 from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
@@ -10,7 +9,7 @@ from netpype.selector import events as selection_events
 from multiprocessing import Pool, cpu_count
 
 
-_LOG = logging.getLogger('netpype.server')
+_LOG = env.get_logger('netpype.server')
 _EMPTY_BUFFER = b''
 
 

@@ -17,7 +17,13 @@ class WhenManipulatingChannelBuffers(unittest.TestCase):
         channel_buffer.sent(2)
         self.assertEqual(3, len(channel_buffer.remaining()))
         channel_buffer.sent(3)
-        self.assertFalse(channel_buffer.has_data())
+        self.assertEqual(0, len(channel_buffer.remaining()))
+
+    def test_checking_if_empty(self):
+        channel_buffer = channel.ChannelBuffer(b'bytes')
+        self.assertFalse(channel_buffer.empty())
+        channel_buffer.sent(5)
+        self.assertTrue(channel_buffer.empty())
 
 
 if __name__ == '__main__':
