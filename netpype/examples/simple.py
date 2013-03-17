@@ -20,6 +20,7 @@ class BasicHandler(NetworkEventHandler):
         return (selection_events.REQUEST_WRITE, b'HTTP/1.1 200 OK\r\n\r\n')
 
     def on_write(self, message):
+        _LOG.info('Requesting close.')
         return (selection_events.REQUEST_CLOSE, None)
 
     def on_close(self, message):

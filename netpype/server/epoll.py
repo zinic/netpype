@@ -30,7 +30,7 @@ class EPollSelectorServer(SelectorServer):
 
     def _poll(self):
         # Poll
-        for fileno, event in self._epoll.poll():
+        for fileno, event in self._epoll.poll(0.01):
             self._on_epoll(event, fileno)
 
     def _on_epoll(self, event, fileno):
@@ -74,11 +74,11 @@ class EPollSelectorServer(SelectorServer):
                             channel_handler.fileno,
                             channel_handler.pipeline,
                             channel_handler.client_addr)
-                if write_buffer.empty():
-                    self._network_event(
-                        selection_events.WRITE_AVAILABLE,
-                        fileno,
-                        channel_handler.pipeline)
+                    if write_buffer.empty():
+                        self._network_event(
+                            selection_events.WRITE_AVAILABLE,
+                            fileno,
+                            channel_handler.pipeline)
             elif event & select.EPOLLHUP:
                 self._network_event(
                     selection_events.CHANNEL_CLOSED,

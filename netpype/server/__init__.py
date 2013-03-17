@@ -6,60 +6,73 @@ import netpype.env as env
 from netpype import PersistentProcess
 from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 from netpype.selector import events as selection_events
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pipe, cpu_count
 
 
 _LOG = env.get_logger('netpype.server')
 _EMPTY_BUFFER = b''
 
 
-def network_event(signal, socket_fileno, handler_pipelines, data=None):
-    if signal == selection_events.CHANNEL_CLOSED:
-        one_way_dispatch('on_close', handler_pipelines.downstream, data)
-        return (selection_events.RECLAIM_CHANNEL, socket_fileno, None)
+class NetworkEventHandler(PersistentProcess):
 
-    if signal == selection_events.CHANNEL_CONNECTED:
-        function = 'on_connect'
-        pipeline = handler_pipelines.downstream
-    elif signal == selection_events.READ_AVAILABLE:
-        function = 'on_read'
-        pipeline = handler_pipelines.downstream
-    elif signal == selection_events.WRITE_AVAILABLE:
-        function = 'on_write'
-        pipeline = handler_pipelines.upstream
-    else:
-        raise Exception('Unable to drive pipeline event: {}.'.format(signal))
-    return pipeline_dispatch(function, socket_fileno, pipeline, data)
+    def __init__(self, event_conn):
+        super(NetworkEventHandler, self).__init__('neh')
+        self._event_conn = event_conn
 
+    def process(self):
+        try:
+            work = self._event_conn.recv()
+            self.network_event(work[0], work[1], work[2], work[3])
+        except Exception as ex:
+            _LOG.exception(ex)
 
-def one_way_dispatch(function, pipeline, data):
-    msg_obj = data
+    def network_event(self, signal, socket_fileno, handler_pipelines, data=None):
+        if signal == selection_events.CHANNEL_CLOSED:
+            self.one_way_dispatch('on_close', handler_pipelines.downstream, data)
+            result = (selection_events.RECLAIM_CHANNEL, socket_fileno, None)
+        else:
+            if signal == selection_events.CHANNEL_CONNECTED:
+                function = 'on_connect'
+                pipeline = handler_pipelines.downstream
+            elif signal == selection_events.READ_AVAILABLE:
+                function = 'on_read'
+                pipeline = handler_pipelines.downstream
+            elif signal == selection_events.WRITE_AVAILABLE:
+                function = 'on_write'
+                pipeline = handler_pipelines.upstream
+            else:
+                raise Exception('Unable to drive pipeline event: {}.'.format(signal))
+            result = self.pipeline_dispatch(function, socket_fileno, pipeline, data)
+        self._event_conn.send(result)
 
-    try:
-        for handler in pipeline:
-            getattr(handler, function)(msg_obj)
-    except Exception as ex:
-        _LOG.exception(ex)
+    def one_way_dispatch(self, function, pipeline, data):
+        msg_obj = data
 
+        try:
+            for handler in pipeline:
+                getattr(handler, function)(msg_obj)
+        except Exception as ex:
+            _LOG.exception(ex)
 
-def pipeline_dispatch(function, socket_fileno, pipeline, data):
-    exit_signal = None
-    msg_obj = data
+    def pipeline_dispatch(self, function, socket_fileno, pipeline, data):
+        exit_signal = None
+        msg_obj = data
 
-    try:
-        for handler in pipeline:
-            result = getattr(handler, function)(msg_obj)
-            if result:
-                exit_signal = result[0]
-                msg_obj = result[1]
-                if not exit_signal == selection_events.FORWARD:
-                    break
-    except Exception as ex:
-        _LOG.exception(ex)
+        try:
+            for handler in pipeline:
+                result = getattr(handler, function)(msg_obj)
+                if result:
+                    exit_signal = result[0]
+                    msg_obj = result[1]
+                    if not exit_signal == selection_events.FORWARD:
+                        break
+        except Exception as ex:
+            _LOG.exception(ex)
 
-    if exit_signal:
-        return (exit_signal, socket_fileno, msg_obj)
-    return None
+        if exit_signal:
+            return (exit_signal, socket_fileno, msg_obj)
+        return (selection_events.REQUEST_CLOSE, socket_fileno, None)
+
 
 class SelectorServer(PersistentProcess):
 
@@ -72,7 +85,10 @@ class SelectorServer(PersistentProcess):
 
     def on_start(self):
         # Init everything else we need now that we're in the sub-process
-        self._workers = Pool(processes=cpu_count())
+        self._event_conn, self._delegat_event_conn = Pipe()
+        self._network_handler = NetworkEventHandler(self._delegat_event_conn)
+        self._network_handler.start()
+
         self._socket = server_socket(self._socket_addr)
         self._socket_fileno = self._socket.fileno()
 
@@ -87,12 +103,13 @@ class SelectorServer(PersistentProcess):
         self._workers().apply()
 
     def _network_event(self, signal, fileno, pipeline, data=None):
-        try:
-            result = network_event(signal, fileno, pipeline, data)
-            if result:
-                self._handle_result(result)
-        except IOError as ioe:
-            self._handle_result
+        self._event_conn.send((signal, fileno, pipeline, data))
+#        try:
+#            result = network_event(signal, fileno, pipeline, data)
+#            if result:
+#                self._handle_result(result)
+#        except IOError as ioe:
+#            self._handle_result
 
     def _accept(self, socket, pipeline_factory):
         # Gimme dat socket
@@ -146,6 +163,8 @@ class SelectorServer(PersistentProcess):
 
     def process(self):
         try:
+            while self._event_conn.poll():
+                self._handle_result(self._event_conn.recv())
             self._poll()
         except IOError as ioe:
             if ioe.errno == errno.EINTR:
