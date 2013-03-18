@@ -1,9 +1,59 @@
-import time
 import unittest
-import logging
-import multiprocessing
 
 import netpype.channel as channel
+
+
+class WhenCopyingArrays(unittest.TestCase):
+
+    def test_array_copy(self):
+        dest = bytearray(10)
+        channel.array_copy(b'test', 0, dest, 0, 4)
+        self.assertEqual('t', chr(dest[0]))
+        self.assertEqual('e', chr(dest[1]))
+        self.assertEqual('s', chr(dest[2]))
+        self.assertEqual('t', chr(dest[3]))
+
+        channel.array_copy(b'test', 2, dest, 8, 2)
+        self.assertEqual('s', chr(dest[8]))
+        self.assertEqual('t', chr(dest[9]))
+
+
+class WhenManipulatingCyclicBuffers(unittest.TestCase):
+
+    def test_init_with_buffer(self):
+        buff = channel.CyclicBuffer(size_hint=10, data=b'test')
+        self.assertEqual(4, buff.available())
+        self.assertEqual(6, buff.remaining())
+
+    def test_get(self):
+        buff = channel.CyclicBuffer(data=b'test')
+        self.assertEqual(4, buff.available())
+        dest = bytearray(buff.available())
+        buff.get(dest, 0, 0)
+        self.assertEqual(4, buff.available())
+        buff.get(dest, 0)
+        self.assertEqual(4, len(dest))
+
+    def test_put(self):
+        buff = channel.CyclicBuffer(size_hint=10)
+        buff.put(b'test', 0)
+        self.assertEqual(4, buff.available())
+        self.assertEqual(6, buff.remaining())
+
+    def test_get_until(self):
+        buff = channel.CyclicBuffer(size_hint=10, data=b'test')
+        self.assertEqual(4, buff.available())
+        data = bytearray(10)
+        buff.get_until(data, 0, ord('s'))
+        self.assertEqual('t', chr(data[0]))
+        self.assertEqual('e', chr(data[1]))
+        self.assertEqual(2, buff.available())
+
+    def test_growing(self):
+        buff = channel.CyclicBuffer(size_hint=10)
+        buff.put(b'More than you can handle.', 0, 25)
+        self.assertEqual(25, buff.available())
+
 
 class WhenManipulatingChannelBuffers(unittest.TestCase):
 
