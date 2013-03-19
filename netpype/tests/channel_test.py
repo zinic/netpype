@@ -45,8 +45,9 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         self.assertEqual(10, buff.available())
         data = bytearray(10)
 
+        # When the delim is not found, we return -1
         read = buff.get_until(ord('_'), data)
-        self.assertEqual(0, read)
+        self.assertEqual(-1, read)
 
         read = buff.get_until(ord(' '), data)
         self.assertEqual(4, read)

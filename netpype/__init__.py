@@ -54,7 +54,7 @@ class PersistentProcess(object):
 
     def _run(self, state):
         self.on_start()
-
+        ## TODO: Fix to state Running
         while state.value == _STATE_NEW:
             try:
                 self.process()

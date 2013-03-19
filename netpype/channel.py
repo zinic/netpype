@@ -103,19 +103,19 @@ class CyclicBuffer(object):
                 if next_byte[0] == delim:
                     return peek_offset
                 peek_offset += 1
-        return 0
+        return -1
 
     def skip_until(self, delim, limit=-1):
         seek_offset = self.seek(delim, limit)
-        if seek_offset != 0:
+        if seek_offset != -1:
             return self.skip(seek_offset)
-        return 0
+        return -1 
 
     def get_until(self, delim, data, offset=0, limit=-1):
         seek_offset = self.seek(delim, limit)
-        if seek_offset != 0:
+        if seek_offset != -1:
             return self.get(data, offset, seek_offset)
-        return 0
+        return -1
 
     def _peek(self, data, offset=0):
         if self._has_elements and self.available() > offset:

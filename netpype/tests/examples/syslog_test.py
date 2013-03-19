@@ -19,56 +19,61 @@ class WhenLexingSyslogHead(unittest.TestCase):
 
     def test_connect(self):
         self.lexer.on_connect('localhost')
-        self.assertEqual(lexer_states.READ_OCTET, self.lexer.get_state())
+        self.assertEqual(lexer_states.START, self.lexer.get_state())
 
     def test_octet_count(self):
         self.lexer.on_connect('localhost')
         self.lexer.on_read(HAPPY_PATH_MESSAGE[:4])
         self.assertEqual(lexer_states.READ_PRI, self.lexer.get_state())
+        self.assertEqual('123', self.lexer._read_limit)
 
     def test_octect_count_too_long(self):
         self.lexer.on_connect('localhost')
-        self.assertRaises(
-            Exception,
-            self.lexer.on_read,
+        self.assertRaises(Exception, self.lexer.on_read,
             b'5193859319513958131234')
 
     def test_pri(self):
-        self.lexer.on_connect('localhost')
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[:4])
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[4:10])
+        self.lexer.on_connect('localhost')        
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 8))
+        self.assertEqual(lexer_states.READ_VERSION, self.lexer.get_state())
+        self.assertEqual('46', self.lexer.get_message().priority)
+
+    def test_version(self):
+        self.lexer.on_connect('localhost')        
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 10))
         self.assertEqual(lexer_states.READ_TIMESTAMP, self.lexer.get_state())
+        self.assertEqual('1', self.lexer.get_message().version)
 
     def test_timestamp(self):
         self.lexer.on_connect('localhost')
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[:4])
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[4:10])
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[10:43])
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 43))
         self.assertEqual(lexer_states.READ_HOSTNAME, self.lexer.get_state())
+        self.assertEqual('2012-12-11T15:48:23.217459-06:00', self.lexer.get_message().timestamp)
 
     def test_hostname(self):
         self.lexer.on_connect('localhost')
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[:4])
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[4:10])
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[10:43])
-        self.lexer.on_read(HAPPY_PATH_MESSAGE[43:49])
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 49))
         self.assertEqual(lexer_states.READ_APPNAME, self.lexer.get_state())
+        self.assertEqual('tohru', self.lexer.get_message().hostname)
 
     def test_appname(self):
         self.lexer.on_connect('localhost')
         map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 58))
         self.assertEqual(lexer_states.READ_PROCESSID, self.lexer.get_state())
+        self.assertEqual('rsyslogd', self.lexer.get_message().appname)
 
     def test_processid(self):
         self.lexer.on_connect('localhost')
         map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 64))
         self.assertEqual(lexer_states.READ_MESSAGEID, self.lexer.get_state())
+        self.assertEqual('6611', self.lexer.get_message().processid)
 
     def test_messageid(self):
         self.lexer.on_connect('localhost')
         map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 69))
         self.assertEqual(
             lexer_states.READ_SD_ELEMENT, self.lexer.get_state())
+        self.assertEqual('12512', self.lexer.get_message().messageid)
 
     def test_sd_element(self):
         self.lexer.on_connect('localhost')
