@@ -9,6 +9,7 @@ from netpype.server.epoll import EPollSelectorServer
 _LOG = env.get_logger('netpype.selector')
 _USE_GENERIC = env.get('GENERIC', False)
 
+
 def new_server(socket_addr, pipeline_factory):
     if not _USE_GENERIC:
         if sys.platform == "linux2" and getattr(select, 'epoll'):
