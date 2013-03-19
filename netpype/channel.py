@@ -87,24 +87,38 @@ class CyclicBuffer(object):
             self._current_size = size_hint
             self.clear()
 
-    def get_until(self, data, offset, delim, limit=-1):
-        if not self._has_elements:
-            return 0
+    def seek(self, delim, limit=-1):
+        if self._has_elements:
+            delm_ord = ord(delim)
+            available = self.available()
+            next_byte = bytearray(1)
+            peek_offset = 0
 
-        next_byte = bytearray(1)
-        peek_offset = 0
-        data_index = offset
-
-        while limit != 0:
-            self.peek(next_byte, peek_offset)
-            if next_byte[0] == delim:
-                self.get(data, offset, peek_offset)
-                return peek_offset
-            limit -= 1
-            peek_offset += 1
+            while peek_offset < available:
+                if limit > 0:
+                    limit -= 1
+                elif limit == 0:
+                    # TODO: Raise a more reasonable exception
+                    raise Exception
+                self._peek(next_byte, peek_offset)
+                if next_byte[0] == delm_ord:
+                    return peek_offset
+                peek_offset += 1
         return 0
 
-    def peek(self, data, offset):
+    def skip_until(self, delim, limit=-1):
+        seek_offset = self.seek(delim, limit)
+        if seek_offset != 0:
+            return self.skip(seek_offset)
+        return 0
+
+    def get_until(self, data, offset, delim, limit=-1):
+        seek_offset = self.seek(delim, limit)
+        if seek_offset != 0:
+            return self.get(data, offset, seek_offset)
+        return 0
+
+    def _peek(self, data, offset):
         if self._has_elements and self.available() > offset:
             read_index = self._read_index + offset
             if read_index > self._current_size:
