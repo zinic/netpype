@@ -1,22 +1,16 @@
 import socket
 import select
-import logging
-import sys
+import errno
+import netpype.env as env
 
 from netpype import PersistentProcess
 from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 from netpype.selector import events as selection_events
+from multiprocessing import Pool, cpu_count
 
 
-_LOG = logging.getLogger('netpype.server')
+_LOG = env.get_logger('netpype.server')
 _EMPTY_BUFFER = b''
-
-
-try:
-    from billiard import Pool, cpu_count
-except ImportError as ie:
-    _LOG.warn('Billard library not available. Multiprocess will be used.')
-    from multiprocessing import Pool, cpu_count
 
 
 def network_event(signal, socket_fileno, handler_pipelines, data=None):
@@ -83,13 +77,16 @@ class SelectorServer(PersistentProcess):
         self._socket_fileno = self._socket.fileno()
 
     def on_halt(self):
-        self._socket.close()
+        if hasattr(self, '_socket'):
+            self._socket.close()
+        if hasattr(self, '_workers'):
+            self._workers.close()
+            self._workers.join()
 
     def dispatch(self, event):
         self._workers().apply()
 
     def _network_event(self, signal, fileno, pipeline, data=None):
-        _LOG.debug('Driving event {} for {}.'.format(signal, fileno))
         try:
             result = network_event(signal, fileno, pipeline, data)
             if result:
@@ -114,9 +111,6 @@ class SelectorServer(PersistentProcess):
     def _handle_result(self, result):
         result_signal = result[0]
         result_fileno = result[1]
-
-        _LOG.debug('Driving result {} for {}.'.format(
-            result_signal, result_fileno))
 
         channel_handler = self._active_channels.get(result_fileno)
         if result_signal == selection_events.REQUEST_READ:
@@ -151,6 +145,15 @@ class SelectorServer(PersistentProcess):
             _LOG.debug('Unrecognized event: {} passed.'.format(result_signal))
 
     def process(self):
+        try:
+            self._poll()
+        except IOError as ioe:
+            if ioe.errno == errno.EINTR:
+                _LOG.warn('Interrupt caught, exiting.')
+        except Exception as ex:
+            _LOG.exception(ex)
+
+    def _poll(self):
         raise NotImplementedError
 
     def _read_requested(self, fileno):
