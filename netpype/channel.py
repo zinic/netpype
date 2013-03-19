@@ -89,7 +89,6 @@ class CyclicBuffer(object):
 
     def seek(self, delim, limit=-1):
         if self._has_elements:
-            delm_ord = ord(delim)
             available = self.available()
             next_byte = bytearray(1)
             peek_offset = 0
@@ -101,7 +100,7 @@ class CyclicBuffer(object):
                     # TODO: Raise a more reasonable exception
                     raise Exception
                 self._peek(next_byte, peek_offset)
-                if next_byte[0] == delm_ord:
+                if next_byte[0] == delim:
                     return peek_offset
                 peek_offset += 1
         return 0
@@ -112,13 +111,13 @@ class CyclicBuffer(object):
             return self.skip(seek_offset)
         return 0
 
-    def get_until(self, data, offset, delim, limit=-1):
+    def get_until(self, delim, data, offset=0, limit=-1):
         seek_offset = self.seek(delim, limit)
         if seek_offset != 0:
             return self.get(data, offset, seek_offset)
         return 0
 
-    def _peek(self, data, offset):
+    def _peek(self, data, offset=0):
         if self._has_elements and self.available() > offset:
             read_index = self._read_index + offset
             if read_index > self._current_size:
@@ -127,50 +126,57 @@ class CyclicBuffer(object):
             return 1
         return 0
 
-    def get(self, data, offset, length=None):
+    def get(self, data, offset=0, length=None):
         if length is None or length > self.available():
             readable = self.available()
         else:
             readable = length
 
         if self._has_elements:
-            if self._read_index + readable > self._current_size:
+            if self._read_index + readable >= self._current_size:
                 trimmed_length = self._current_size - self._read_index
                 next_read_index = readable - trimmed_length
-                array_copy(self._buffer, self._read_index, data, offset, trimmed_length)
-                array_copy(self._buffer, 0, data, offset + trimmed_length, next_read_index)
+                array_copy(self._buffer, self._read_index, data,
+                           offset, trimmed_length)
+                array_copy(self._buffer, 0, data,
+                           offset + trimmed_length, next_read_index)
                 self._read_index = next_read_index
             else:
-                array_copy(self._buffer, self._read_index, data, offset, readable)
+                array_copy(self._buffer, self._read_index,
+                           data, offset, readable)
                 if self._read_index + readable < self._current_size:
                     self._read_index += readable
                 else:
-                    self._read_index = readable - (self._current_size - self._read_index)
+                    self._read_index = readable - (
+                        self._current_size - self._read_index)
             if self._read_index == self._write_index:
                 self._has_elements = False
         return readable
 
-    def put(self, data, offset, length=None):
+    def put(self, data, offset=0, length=None):
         if not length:
             length = len(data)
-
         remaining = self.remaining()
         if remaining < length:
             self.grow(length - remaining)
-        if self._write_index + length > self._current_size:
+        if self._write_index + length >= self._current_size:
             trimmed_length = self._current_size - self._write_index
             next_write_index = length - trimmed_length
-            array_copy(data, offset, self._buffer, self._write_index, trimmed_length)
-            array_copy(data, offset + trimmed_length, self._buffer, 0, next_write_index)
+            array_copy(data, offset, self._buffer,
+                       self._write_index, trimmed_length)
+            array_copy(data, offset + trimmed_length,
+                       self._buffer, 0, next_write_index)
             self._write_index = next_write_index
         else:
-            array_copy(data, offset, self._buffer, self._write_index, length)
+            array_copy(data, offset, self._buffer,
+                       self._write_index, length)
             self._write_index += length
         self._has_elements = True
         return length
 
     def grow(self, min_length):
-        new_size = self._current_size + self._current_size * (min_length / self._current_size + 1)
+        new_size = self._current_size * 2 * (
+            int(min_length / self._current_size) + 1)
         new_buffer = bytearray(new_size)
         read = self.get(new_buffer, 0, new_size)
         self._buffer = new_buffer
@@ -208,9 +214,10 @@ class CyclicBuffer(object):
             self._write_index = 0
         else:
             if self._read_index + length < self._current_size:
-                self._read_index = self._read_index + length
+                self._read_index += length
             else:
-                self._read_index = length - (self._current_size - self._read_index)
+                self._read_index = length - self._current_size
+                self._read_index -= self._read_index
 
         if self._read_index == self._write_index:
             self._has_elements = False
@@ -222,6 +229,8 @@ class CyclicBuffer(object):
 This is a simple read buffer idiom to prevent buffer manipulation operations
 while reading data.
 """
+
+
 class ChannelBuffer(object):
 
     def __init__(self, initial_buffer=b''):
@@ -251,6 +260,8 @@ handlers and organize them into an upstream pipeline and a downstream pipeline.
 New pipelines are created for new connections, meaning that each pipeline has a
 1:1 ratio with the server's sockets.
 """
+
+
 class PipelineFactory(object):
 
     def upstream_pipeline(self):
@@ -271,6 +282,8 @@ signal and, if present, a message payload. There is also the expectation that
 the evente methods will return in a timely fashion, otherwise the handler risks
 holding up the I/O polling loop.
 """
+
+
 class NetworkEventHandler(object):
 
     """
@@ -286,16 +299,16 @@ class NetworkEventHandler(object):
 
     """
     A NetworkEventHandler may recieve an event describing that a network client
-    has disconnected. This disconnect may happen at any time or due to an error.
-    The message argument of this method represents the address of the client
-    that was connected.
+    has disconnected. This disconnect may happen at any time or due to an
+    error. The message argument of this method represents the address of the
+    client that was connected.
 
     A handler may forward an event to the following handler by returning using
     the netpype.selector.FORWARD signal. The argument is passed to the next
     handler as its message.
 
-    A handler may request socket events. Socket events break out of the pipeline
-    and are acted upon immediately.
+    A handler may request socket events. Socket events break out of the
+    pipeline and are acted upon immediately.
 
     The following socket events are allowed:
         * netpype.selector.REQUEST_WRITE
@@ -317,8 +330,8 @@ class NetworkEventHandler(object):
     the netpype.selector.FORWARD signal. The argument is passed to the next
     handler as its message.
 
-    A handler may request socket events. Socket events break out of the pipeline
-    and are acted upon immediately.
+    A handler may request socket events. Socket events break out of the
+    pipeline and are acted upon immediately.
 
     The following socket events are allowed:
         * netpype.selector.REQUEST_WRITE

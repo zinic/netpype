@@ -41,27 +41,36 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         self.assertEqual(6, buff.remaining())
 
     def test_get_until(self):
-        buff = channel.CyclicBuffer(size_hint=10, data=b'test test')
-        self.assertEqual(9, buff.available())
+        buff = channel.CyclicBuffer(size_hint=10, data=b'test test!')
+        self.assertEqual(10, buff.available())
         data = bytearray(10)
 
-        read = buff.get_until(data, 0, '_')
+        read = buff.get_until(ord('_'), data)
         self.assertEqual(0, read)
 
-        read = buff.get_until(data, 0, ' ')
+        read = buff.get_until(ord(' '), data)
         self.assertEqual(4, read)
-
+        self.assertEqual(6, buff.available())
         self.assertEqual('t', chr(data[0]))
         self.assertEqual('e', chr(data[1]))
         self.assertEqual('s', chr(data[2]))
         self.assertEqual('t', chr(data[3]))
+        buff.skip(1)
+        read = buff.get_until(ord('!'), data, 4)
+        self.assertEqual(1, buff.available())
+        self.assertEqual('t', chr(data[4]))
+        self.assertEqual('e', chr(data[5]))
+        self.assertEqual('s', chr(data[6]))
+        self.assertEqual('t', chr(data[7]))
+        buff.skip(1)
+        self.assertEqual(0, buff.available())
 
     def test_get_until_over_limit(self):
         buff = channel.CyclicBuffer(size_hint=10, data=b'test test')
         self.assertEqual(9, buff.available())
         data = bytearray(10)
 
-        self.assertRaises(Exception, buff.get_until, (data, 0, '_', 1))
+        self.assertRaises(Exception, buff.get_until, ('_', data, 0, 1))
 
     def test_growing(self):
         buff = channel.CyclicBuffer(size_hint=10)

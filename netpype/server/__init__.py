@@ -61,6 +61,7 @@ def pipeline_dispatch(function, socket_fileno, pipeline, data):
         return (exit_signal, socket_fileno, msg_obj)
     return None
 
+
 class SelectorServer(PersistentProcess):
 
     def __init__(self, socket_addr, pipeline_factory):

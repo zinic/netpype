@@ -8,6 +8,11 @@ from netpype.channel import NetworkEventHandler, PipelineFactory
 
 _LOG = env.get_logger('netpype.examples.simple')
 _MAX_BYTES = 536870912
+_SPACE_ORD = ord(' ')
+_QUOTE_ORD = ord('"')
+_EQUALS_ORD = ord('=')
+_OPEN_BRACKET_ORD = ord('[')
+_CLOSE_BRACKET_ORD = ord(']')
 
 
 class LexerState(object):
@@ -24,8 +29,11 @@ class LexerState(object):
     READ_SD_FIELD_NAME = 10
     READ_SD_VALUE_START = 11
     READ_SD_VALUE_CONTENT = 12
+    READ_SD_NEXT_FIELD_OR_END = 13
+    READ_MESSAGE = 14
 
 lexer_states = LexerState()
+
 
 class SyslogLexer(NetworkEventHandler):
 
@@ -58,7 +66,10 @@ class SyslogLexer(NetworkEventHandler):
     def parse_next(self):
         if self._accumulator.available() > 0:
             if self._state == lexer_states.READ_OCTET:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 9)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=9)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
@@ -66,7 +77,10 @@ class SyslogLexer(NetworkEventHandler):
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_PRI:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 7)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=7)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
@@ -74,7 +88,10 @@ class SyslogLexer(NetworkEventHandler):
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_TIMESTAMP:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 48)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=48)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
@@ -82,7 +99,10 @@ class SyslogLexer(NetworkEventHandler):
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_HOSTNAME:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 255)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=255)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
@@ -90,7 +110,10 @@ class SyslogLexer(NetworkEventHandler):
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_APPNAME:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 48)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=48)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
@@ -98,7 +121,10 @@ class SyslogLexer(NetworkEventHandler):
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_PROCESSID:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 128)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=128)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
@@ -106,43 +132,88 @@ class SyslogLexer(NetworkEventHandler):
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_MESSAGEID:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 32)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=32)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
-                    self._state = lexer_states.READ_HOSTNAME
+                    self._state = lexer_states.READ_SD_ELEMENT
                     value = self._lookaside[:read]
                     return True
             elif self._state == lexer_states.READ_SD_ELEMENT:
-                read = self._accumulator.skip_until('[', 16)
+                read = self._accumulator.get(
+                    data=self._lookaside,
+                    length=1)
+
                 if read > 0:
-                    # Skip the head symbol
-                    self._accumulator.skip(1)
-                    self._state = lexer_states.READ_SD_ELEMENT_NAME
+                    potential_delim = self._lookaside[0]
+                    if potential_delim == _SPACE_ORD:
+                        self._state = lexer_states.READ_MESSAGE
+                    elif potential_delim == _OPEN_BRACKET_ORD:
+                        self._state = lexer_states.READ_SD_ELEMENT_NAME
+                    else:
+                        raise Exception('Unexpected: {} - {}'.format(
+                            chr(potential_delim), potential_delim))
+                    return True
             elif self._state == lexer_states.READ_SD_ELEMENT_NAME:
-                read = self._accumulator.get_until(self._lookaside, 0, ' ', 32)
+                read = self._accumulator.get_until(
+                    delim=_SPACE_ORD,
+                    data=self._lookaside,
+                    limit=32)
                 if read > 0:
                     # Skip the following space
                     self._accumulator.skip(1)
                     self._state = lexer_states.READ_SD_FIELD_NAME
+                    return True
             elif self._state == lexer_states.READ_SD_FIELD_NAME:
-                read = self._accumulator.get_until(self._lookaside, 0, '=', 32)
+                read = self._accumulator.get_until(
+                    delim=_EQUALS_ORD,
+                    data=self._lookaside,
+                    limit=32)
                 if read > 0:
                     # Skip the assignment symbol
                     self._accumulator.skip(1)
                     self._state = lexer_states.READ_SD_VALUE_START
+                    return True
             elif self._state == lexer_states.READ_SD_VALUE_START:
-                read = self._accumulator.skip_until('"', 16)
+                read = self._accumulator.get(
+                    data=self._lookaside,
+                    length=1)
+
+                if read > 0:
+                    potential_delim = self._lookaside[0]
+                    if potential_delim == _QUOTE_ORD:
+                        self._state = lexer_states.READ_SD_VALUE_CONTENT
+                    else:
+                        raise Exception('Unexpected: {} - {}'.format(
+                            chr(potential_delim), potential_delim))
+                    return True
+            elif self._state == lexer_states.READ_SD_VALUE_CONTENT:
+                read = self._accumulator.get_until(
+                    delim=_QUOTE_ORD,
+                    data=self._lookaside,
+                    limit=255)
                 if read > 0:
                     # Skip the quote
                     self._accumulator.skip(1)
-                    self._state = lexer_states.READ_SD_VALUE_CONTENT
-            elif self._state == lexer_states.READ_SD_VALUE_CONTENT:
-                read = self._accumulator.get_until(self._lookaside, 0, '"', 16)
-                if read > 0:
-                    self._state = lexer_states.READ_SD_FIELD_NAME
+                    self._state = lexer_states.READ_SD_NEXT_FIELD_OR_END
+                    return True
+            elif self._state == lexer_states.READ_SD_NEXT_FIELD_OR_END:
+                read = self._accumulator.get(
+                    data=self._lookaside,
+                    length=1)
 
+                if read > 0:
+                    potential_delim = self._lookaside[0]
+                    if potential_delim == _SPACE_ORD:
+                        self._state = lexer_states.READ_SD_FIELD_NAME
+                    elif potential_delim == _CLOSE_BRACKET_ORD:
+                        self._state = lexer_states.READ_SD_ELEMENT
+                    return True
         return False
+
 
 class BasicPipelineFactory(PipelineFactory):
 
