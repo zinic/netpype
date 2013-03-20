@@ -1,10 +1,7 @@
-import socket
 import select
 import netpype.env as env
 
-from netpype import PersistentProcess
 from netpype.server import SelectorServer
-from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 from netpype.selector import events as selection_events
 
 
@@ -23,7 +20,7 @@ class EPollSelectorServer(SelectorServer):
         self._epoll.register(self._socket_fileno, select.EPOLLIN)
 
     def on_halt(self):
-        if hasattr(self, '_epoll'):
+        if hasattr(self, '_select_epoll'):
             self._epoll.unregister(self._socket_fileno)
             self._epoll.close()
         super(EPollSelectorServer, self).on_halt()
