@@ -1,13 +1,16 @@
 import unittest
+import time
+
+import cProfile
 
 from netpype.examples.syslog import SyslogLexer, lexer_states
 
 
-HAPPY_PATH_MESSAGE = (b'259 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
-                      b'rsyslogd 6611 12512 [origin software="rsyslogd" ' +
+HAPPY_PATH_MESSAGE = (b'263 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
+                      b'rsyslogd 6611 12512 [origin_1 software="rsyslogd" ' +
                       b'swVersion="7.2.2" x-pid="12297" ' +
                       b'x-info="http://www.rsyslog.com"]' +
-                      b'[origin software="rsyslogd" swVersion="7.2.2" ' +
+                      b'[origin_2 software="rsyslogd" swVersion="7.2.2" ' +
                       b'x-pid="12297" x-info="http://www.rsyslog.com"] ' +
                       b'start')
 
@@ -25,7 +28,7 @@ class WhenLexingSyslogHead(unittest.TestCase):
         self.lexer.on_connect('localhost')
         self.lexer.on_read(HAPPY_PATH_MESSAGE[:4])
         self.assertEqual(lexer_states.READ_PRI, self.lexer.get_state())
-        self.assertEqual(255, self.lexer._octet_count)
+        self.assertEqual(259, self.lexer._octet_count)
 
     def test_octect_count_too_long(self):
         self.lexer.on_connect('localhost')
@@ -83,27 +86,43 @@ class WhenLexingSyslogHead(unittest.TestCase):
 
     def test_sd_element_name(self):
         self.lexer.on_connect('localhost')
-        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 77))
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 79))
         self.assertEqual(
             lexer_states.READ_SD_FIELD_NAME, self.lexer.get_state())
 
     def test_sd_field_name(self):
         self.lexer.on_connect('localhost')
-        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 86))
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 88))
         self.assertEqual(
             lexer_states.READ_SD_VALUE_START, self.lexer.get_state())
 
     def test_sd_field_value_start(self):
         self.lexer.on_connect('localhost')
-        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 87))
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 89))
         self.assertEqual(
             lexer_states.READ_SD_VALUE_CONTENT, self.lexer.get_state())
 
     def test_sd_field_value_content(self):
         self.lexer.on_connect('localhost')
-        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 96))
+        map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 98))
         self.assertEqual(
             lexer_states.READ_SD_NEXT_FIELD_OR_END, self.lexer.get_state())
+
+    def test_sd(self):
+        map(self.lexer.on_read,
+            chunk(HAPPY_PATH_MESSAGE, len(HAPPY_PATH_MESSAGE)))
+        def check(sd_element):
+            self.assertEqual(
+                'rsyslogd', str(sd_element.sd_field('software').value))
+            self.assertEqual(
+                '7.2.2', str(sd_element.sd_field('swVersion').value))
+            self.assertEqual(
+                '12297', str(sd_element.sd_field('x-pid').value))
+            self.assertEqual(
+                'http://www.rsyslog.com', 
+                str(sd_element.sd_field('x-info').value))
+        check(self.lexer._message.sd_element('origin_1'))
+        check(self.lexer._message.sd_element('origin_2'))
 
     def test_msg(self):
         self.lexer.on_connect('localhost')
@@ -111,16 +130,32 @@ class WhenLexingSyslogHead(unittest.TestCase):
             chunk(HAPPY_PATH_MESSAGE, len(HAPPY_PATH_MESSAGE)))
         self.assertEqual(
             lexer_states.START, self.lexer.get_state())
+        
+def performance():
+    lexer = SyslogLexer()
+    data_length = len(HAPPY_PATH_MESSAGE)
+    runs = 0
+    then = time.time()
+    while time.time() - then < 10:
+        map(lexer.on_read,
+            chunk(HAPPY_PATH_MESSAGE, data_length, 1024))
+        runs += 1
+    print('Ran {} times in {} seconds for {} runs per second.'.format(
+        runs,
+        10,
+        runs / 10.0))
 
 
-def chunk(data, limit):
+def chunk(data, limit, chunk_size=10):
     index = 0
     while index < limit:
-        next_index = index + 10
+        next_index = index + chunk_size
         end_index = next_index if next_index < limit else limit
         yield data[index:end_index]
         index = end_index
 
 
 if __name__ == '__main__':
+    #cProfile.run('performance()')
+    performance()
     unittest.main()

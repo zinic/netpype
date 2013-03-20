@@ -62,14 +62,7 @@ class ChannelPipeline(object):
 
 
 def array_copy(source, src_offset, destination, dest_offset, length):
-    src_index = src_offset
-    dest_index = dest_offset
-    remaining = length
-    while remaining > 0:
-        destination[dest_index] = source[src_index]
-        src_index += 1
-        dest_index += 1
-        remaining -= 1
+    destination[dest_offset:dest_offset+length] = source[src_offset:src_offset+length]
 
 
 class CyclicBuffer(object):
@@ -120,7 +113,7 @@ class CyclicBuffer(object):
     def _peek(self, data, offset=0):
         if self._has_elements and self.available() > offset:
             read_index = self._read_index + offset
-            if read_index > self._current_size:
+            if read_index >= self._current_size:
                 read_index -= self._current_size
             array_copy(self._buffer, read_index, data, 0, 1)
             return 1

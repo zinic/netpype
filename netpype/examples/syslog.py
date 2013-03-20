@@ -48,14 +48,30 @@ class SyslogMessage(object):
         name = str(name_bytes)
         sd_element = self.structured_data.get(name)
         if sd_element is None:
-            sd_element = StructuredData()
+            sd_element = StructuredData(name)
             self.structured_data[name] = sd_element
         return sd_element
 
 
 class StructuredData(object):
-    pass
+    
+    def __init__(self, name):
+        self.fields = dict()
+    
+    def sd_field(self, name_bytes):
+        name = str(name_bytes)
+        sd_field = self.fields.get(name)
+        if sd_field is None:
+            sd_field = StructuredDataField(name)
+            self.fields[name] = sd_field
+        return sd_field
 
+
+class StructuredDataField(object):
+    
+    def __init__(self, name):
+        self.name = name
+        self.value = None
 
 class SyslogLexer(NetworkEventHandler):
 
@@ -95,6 +111,8 @@ class SyslogLexer(NetworkEventHandler):
         if self._state == lexer_states.START:
             self._octet_count = 0
             self._state = lexer_states.READ_OCTET
+            self._structured_data = None
+            self._sd_field = None
         if self._state == lexer_states.READ_OCTET:
             read = self._accumulator.get_until(
                 delim=_SPACE_ORD,
@@ -209,6 +227,8 @@ class SyslogLexer(NetworkEventHandler):
             if read > -1:
                 # Skip the assignment symbol
                 self._skip(1)
+                self._sd_field = self._structured_data.sd_field(
+                    self._lookaside[:read])             
                 self._state = lexer_states.READ_SD_VALUE_START
         elif self._state == lexer_states.READ_SD_VALUE_START:
             read = self._accumulator.get_until(
@@ -227,6 +247,7 @@ class SyslogLexer(NetworkEventHandler):
             if read > -1:
                 # Skip the quote
                 self._skip(1)
+                self._sd_field.value = self._lookaside[:read]
                 self._state = lexer_states.READ_SD_NEXT_FIELD_OR_END
         elif self._state == lexer_states.READ_SD_NEXT_FIELD_OR_END:
             read = self._accumulator.get(
