@@ -39,6 +39,21 @@ lexer_states = LexerState()
 
 
 class SyslogMessage(object):
+
+    def __init__(self, message_length):
+        self.structured_data = dict()
+        self.message_length = message_length
+
+    def sd_element(self, name_bytes):
+        name = str(name_bytes)
+        sd_element = self.structured_data.get(name)
+        if sd_element is None:
+            sd_element = StructuredData()
+            self.structured_data[name] = sd_element
+        return sd_element
+
+
+class StructuredData(object):
     pass
 
 
@@ -72,10 +87,13 @@ class SyslogLexer(NetworkEventHandler):
     def on_close(self, message):
         _LOG.info('Closing connection to {}'.format(message))
 
+    def _skip(self, length):
+        self._octet_count -= self._accumulator.skip(length)
+
     def parse_next(self):
         read = -1
         if self._state == lexer_states.START:
-            self._message = SyslogMessage()
+            self._octet_count = 0
             self._state = lexer_states.READ_OCTET
         if self._state == lexer_states.READ_OCTET:
             read = self._accumulator.get_until(
@@ -83,10 +101,12 @@ class SyslogLexer(NetworkEventHandler):
                 data=self._lookaside,
                 limit=9)
             if read > -1:
+                # Set octet count
+                self._octet_count = int(self._lookaside[:read])
+                self._message = SyslogMessage(self._octet_count)
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_PRI
-                self._read_limit = self._lookaside[:read]
         elif self._state == lexer_states.READ_PRI:
             read = self._accumulator.get_until(
                 delim=_CLOSE_ANGLE_BRACKET_ORD,
@@ -94,7 +114,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=5)
             if read > -1:
                 # Skip the following closing angle bracket
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_VERSION
                 self._message.priority = self._lookaside[1:read]
         elif self._state == lexer_states.READ_VERSION:
@@ -104,7 +124,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=2)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_TIMESTAMP
                 self._message.version = self._lookaside[:read]
         elif self._state == lexer_states.READ_TIMESTAMP:
@@ -114,7 +134,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=48)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_HOSTNAME
                 self._message.timestamp = self._lookaside[:read]
         elif self._state == lexer_states.READ_HOSTNAME:
@@ -124,7 +144,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=255)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_APPNAME
                 self._message.hostname = self._lookaside[:read]
         elif self._state == lexer_states.READ_APPNAME:
@@ -134,7 +154,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=48)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_PROCESSID
                 self._message.appname = self._lookaside[:read]
         elif self._state == lexer_states.READ_PROCESSID:
@@ -144,7 +164,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=128)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_MESSAGEID
                 self._message.processid = self._lookaside[:read]
         elif self._state == lexer_states.READ_MESSAGEID:
@@ -154,7 +174,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=32)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_SD_ELEMENT
                 self._message.messageid = self._lookaside[:read]
         elif self._state == lexer_states.READ_SD_ELEMENT:
@@ -177,7 +197,9 @@ class SyslogLexer(NetworkEventHandler):
                 limit=32)
             if read > -1:
                 # Skip the following space
-                self._accumulator.skip(1)
+                self._skip(1)
+                self._structured_data = self._message.sd_element(
+                    self._lookaside[:read])
                 self._state = lexer_states.READ_SD_FIELD_NAME
         elif self._state == lexer_states.READ_SD_FIELD_NAME:
             read = self._accumulator.get_until(
@@ -186,7 +208,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=32)
             if read > -1:
                 # Skip the assignment symbol
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_SD_VALUE_START
         elif self._state == lexer_states.READ_SD_VALUE_START:
             read = self._accumulator.get_until(
@@ -195,7 +217,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=32)
             if read > -1:
                 # Skip the quote
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_SD_VALUE_CONTENT
         elif self._state == lexer_states.READ_SD_VALUE_CONTENT:
             read = self._accumulator.get_until(
@@ -204,7 +226,7 @@ class SyslogLexer(NetworkEventHandler):
                 limit=255)
             if read > -1:
                 # Skip the quote
-                self._accumulator.skip(1)
+                self._skip(1)
                 self._state = lexer_states.READ_SD_NEXT_FIELD_OR_END
         elif self._state == lexer_states.READ_SD_NEXT_FIELD_OR_END:
             read = self._accumulator.get(
@@ -219,13 +241,16 @@ class SyslogLexer(NetworkEventHandler):
         elif self._state == lexer_states.READ_MESSAGE:
             read = self._accumulator.get(
                 data=self._lookaside,
-                length=255)
+                length=self._octet_count)
 
-            if read > 0:
-                pass
+            if read > 0 and self._octet_count - read == 0:
+                self._state = lexer_states.START
 
         # If something was read, there might be more
         if read > 0:
+            self._octet_count -= read
+            if self._octet_count < 0:
+                raise Exception
             return True
         else:
             return False

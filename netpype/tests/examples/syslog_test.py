@@ -3,7 +3,7 @@ import unittest
 from netpype.examples.syslog import SyslogLexer, lexer_states
 
 
-HAPPY_PATH_MESSAGE = (b'123 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
+HAPPY_PATH_MESSAGE = (b'259 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
                       b'rsyslogd 6611 12512 [origin software="rsyslogd" ' +
                       b'swVersion="7.2.2" x-pid="12297" ' +
                       b'x-info="http://www.rsyslog.com"]' +
@@ -25,7 +25,7 @@ class WhenLexingSyslogHead(unittest.TestCase):
         self.lexer.on_connect('localhost')
         self.lexer.on_read(HAPPY_PATH_MESSAGE[:4])
         self.assertEqual(lexer_states.READ_PRI, self.lexer.get_state())
-        self.assertEqual('123', self.lexer._read_limit)
+        self.assertEqual(255, self.lexer._octet_count)
 
     def test_octect_count_too_long(self):
         self.lexer.on_connect('localhost')
@@ -110,7 +110,7 @@ class WhenLexingSyslogHead(unittest.TestCase):
         map(self.lexer.on_read,
             chunk(HAPPY_PATH_MESSAGE, len(HAPPY_PATH_MESSAGE)))
         self.assertEqual(
-            lexer_states.READ_MESSAGE, self.lexer.get_state())
+            lexer_states.START, self.lexer.get_state())
 
 
 def chunk(data, limit):
