@@ -1,47 +1,31 @@
 import unittest
+import time
 
 import netpype.channel as channel
-
-
-class WhenCopyingArrays(unittest.TestCase):
-
-    def test_array_copy(self):
-        dest = bytearray(10)
-        channel.array_copy(b'test', 0, dest, 0, 4)
-        self.assertEqual('t', chr(dest[0]))
-        self.assertEqual('e', chr(dest[1]))
-        self.assertEqual('s', chr(dest[2]))
-        self.assertEqual('t', chr(dest[3]))
-
-        channel.array_copy(b'test', 2, dest, 8, 2)
-        self.assertEqual('s', chr(dest[8]))
-        self.assertEqual('t', chr(dest[9]))
-
 
 class WhenManipulatingCyclicBuffers(unittest.TestCase):
 
     def test_init_with_buffer(self):
-        buff = channel.CyclicBuffer(size_hint=10, data=b'test')
+        buff = channel.CyclicBuffer(size_hint=10, data=bytearray('test'))
         self.assertEqual(4, buff.available())
         self.assertEqual(6, buff.remaining())
 
     def test_recycling(self):
-        buff = channel.CyclicBuffer(size_hint=10, data=b'test')
+        buff = channel.CyclicBuffer(size_hint=10, data=bytearray('test'))
         dest = bytearray(10)
         read = buff.get(dest)
         self.assertEqual(4, read)
-        buff.put(b'testing!!')
+        buff.put(bytearray('testing!!'))
         read = buff.get(dest)
         self.assertEqual(9, read)
         self.assertEqual(0, buff.available())
-        buff.put(b'testing')
+        buff.put(bytearray('testing'))
         read = buff.get(dest)
         self.assertEqual(7, read)
         self.assertEqual(0, buff.available())
-        self.fail()
-
+        
     def test_get(self):
-        buff = channel.CyclicBuffer(data=b'test')
+        buff = channel.CyclicBuffer(data=bytearray('test'))
         self.assertEqual(4, buff.available())
         dest = bytearray(buff.available())
         buff.get(dest, 0, 0)
@@ -51,20 +35,20 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
 
     def test_put(self):
         buff = channel.CyclicBuffer(size_hint=10)
-        buff.put(b'test', 0)
+        buff.put(bytearray('test'), 0)
         self.assertEqual(4, buff.available())
         self.assertEqual(6, buff.remaining())
 
     def test_get_until(self):
-        buff = channel.CyclicBuffer(size_hint=10, data=b'test test!')
+        buff = channel.CyclicBuffer(size_hint=10, data=bytearray('test test!'))
         self.assertEqual(10, buff.available())
         data = bytearray(10)
 
         # When the delim is not found, we return -1
-        found, read = buff.get_until(ord('_'), data)
-        self.assertFalse(found)
-
-        found, read = buff.get_until(ord(' '), data)
+        read = buff.get_until(ord('_'), data)
+        self.assertEqual(-1, read)
+        
+        read = buff.get_until(ord(' '), data)
         self.assertEqual(4, read)
         self.assertEqual(6, buff.available())
         self.assertEqual('t', chr(data[0]))
@@ -82,7 +66,7 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         self.assertEqual(0, buff.available())
 
     def test_get_until_over_limit(self):
-        buff = channel.CyclicBuffer(size_hint=10, data=b'test test')
+        buff = channel.CyclicBuffer(size_hint=10, data=bytearray('test test'))
         self.assertEqual(9, buff.available())
         data = bytearray(10)
 
@@ -90,18 +74,18 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
 
     def test_growing(self):
         buff = channel.CyclicBuffer(size_hint=10)
-        buff.put(b'More than you can handle.', 0, 25)
+        buff.put(bytearray('More than you can handle.'), 0, 25)
         self.assertEqual(25, buff.available())
 
 
 class WhenManipulatingChannelBuffers(unittest.TestCase):
 
     def test_init_with_buffer(self):
-        channel_buffer = channel.ChannelBuffer(b'bytes')
+        channel_buffer = channel.ChannelBuffer(bytearray('bytes'))
         self.assertEqual(5, channel_buffer.size())
 
     def test_reading_buffer(self):
-        channel_buffer = channel.ChannelBuffer(b'bytes')
+        channel_buffer = channel.ChannelBuffer(bytearray('bytes'))
         self.assertEqual(5, len(channel_buffer.remaining()))
         channel_buffer.sent(2)
         self.assertEqual(3, len(channel_buffer.remaining()))
@@ -109,7 +93,7 @@ class WhenManipulatingChannelBuffers(unittest.TestCase):
         self.assertEqual(0, len(channel_buffer.remaining()))
 
     def test_checking_if_empty(self):
-        channel_buffer = channel.ChannelBuffer(b'bytes')
+        channel_buffer = channel.ChannelBuffer(bytearray('bytes'))
         self.assertFalse(channel_buffer.empty())
         channel_buffer.sent(5)
         self.assertTrue(channel_buffer.empty())

@@ -6,7 +6,7 @@ import cProfile
 from netpype.examples.syslog import SyslogLexer, lexer_states
 
 
-HAPPY_PATH_MESSAGE = (b'263 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
+HAPPY_PATH_MESSAGE = bytearray(b'263 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
                       b'rsyslogd 6611 12512 [origin_1 software="rsyslogd" ' +
                       b'swVersion="7.2.2" x-pid="12297" ' +
                       b'x-info="http://www.rsyslog.com"]' +
@@ -30,10 +30,11 @@ class WhenLexingSyslogHead(unittest.TestCase):
         self.assertEqual(lexer_states.READ_PRI, self.lexer.get_state())
         self.assertEqual(259, self.lexer._octet_count)
 
-    def test_octect_count_too_long(self):
-        self.lexer.on_connect('localhost')
-        self.assertRaises(Exception, self.lexer.on_read,
-            b'5193859319513958131234')
+    # Not sure if want
+#    def test_octect_count_too_long(self):
+#        self.lexer.on_connect('localhost')
+#        self.assertRaises(Exception, self.lexer.on_read,
+#                          b'5193859319513958131234')
 
     def test_pri(self):
         self.lexer.on_connect('localhost')        
@@ -44,14 +45,17 @@ class WhenLexingSyslogHead(unittest.TestCase):
     def test_version(self):
         self.lexer.on_connect('localhost')        
         map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 10))
-        self.assertEqual(lexer_states.READ_TIMESTAMP, self.lexer.get_state())
+        self.assertEqual(
+            lexer_states.READ_TIMESTAMP, self.lexer.get_state())
         self.assertEqual('1', self.lexer.get_message().version)
 
     def test_timestamp(self):
         self.lexer.on_connect('localhost')
         map(self.lexer.on_read, chunk(HAPPY_PATH_MESSAGE, 43))
         self.assertEqual(lexer_states.READ_HOSTNAME, self.lexer.get_state())
-        self.assertEqual('2012-12-11T15:48:23.217459-06:00', self.lexer.get_message().timestamp)
+        self.assertEqual(
+            '2012-12-11T15:48:23.217459-06:00',
+            self.lexer.get_message().timestamp)
 
     def test_hostname(self):
         self.lexer.on_connect('localhost')
@@ -157,9 +161,9 @@ def chunk(data, limit, chunk_size=10):
 
 
 if __name__ == '__main__':
-    #cProfile.run('performance()')
-    print('Executing warm-up run')
-    performance(10, False)
-    print('Executing performance test')
-    performance(5)
+    cProfile.run('performance(10)')
+    #print('Executing warm-up run')
+    #performance(10, False)
+    #print('Executing performance test')
+    #performance(5)
     #unittest.main()

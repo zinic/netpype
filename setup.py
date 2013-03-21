@@ -13,7 +13,7 @@ from Cython.Distutils import build_ext
 
 setup(
     cmdclass={'build_ext': build_ext},
-    ext_modules=[Extension("netpype.epoll_c", ["netpype/epoll_c.pyx"])]
+    ext_modules=[Extension("netpype.cutil", ["netpype/cutil.pyx"], extra_compile_args=['-O2'])]
 )
 
 setup(

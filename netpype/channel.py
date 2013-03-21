@@ -2,9 +2,24 @@ import socket
 import select
 import netpype.env as env
 
-
 _LOG = env.get_logger('netpype.channel')
-_EMPTY_BUFFER = b''
+
+try:
+    from netpype.cutil import buffer_seek as seek
+except ImportError:
+    _LOG.warn('Unable to find C extensions. Falling back on python impl.')
+    def seek(delim, source, size, read_index, available):
+        seek_offset = 0
+        while seek_offset < available:
+            seek_index = read_index + seek_offset
+            if seek_index + seek_offset >= size:
+                seek_index -= size
+            if source[seek_index] == delim:
+                return seek_offset
+            seek_offset += 1
+        return -1
+
+_EMPTY_BUFFER = bytearray()
 
 UNIX_SOCK = socket.AF_UNIX
 IPv4_SOCK = socket.AF_INET
@@ -80,34 +95,19 @@ class CyclicBuffer(object):
             self._current_size = size_hint
             self.clear()
 
-    def seek(self, delim, limit=-1):
-        seek_offset = 0
-        if self._available > 0:
-            while seek_offset < self._available:
-                if limit > 0:
-                    limit -= 1
-                elif limit == 0:
-                    # TODO: Raise a more reasonable exception
-                    raise Exception('Read limit reached. Available')
-                seek_index = self._read_index + seek_offset
-                if seek_index+seek_offset >= self._current_size:
-                    seek_index -= self._current_size
-                if self._buffer[seek_index] == delim:
-                    return True, seek_offset
-                seek_offset += 1
-        return False, seek_offset
-
     def skip_until(self, delim, limit=-1):
-        found, seek_offset = self.seek(delim, limit)
-        if found:
-            offset = self.skip(seek_offset)
-        return found, offset
+        seek_offset = seek(delim, self._buffer, 
+            self._current_size, self._read_index, self._available)
+        if seek_offset > 0:
+            return self.skip(seek_offset)
+        return seek_offset
 
     def get_until(self, delim, data, offset=0, limit=-1):
-        found, seek_offset = self.seek(delim, limit)
-        if found:
-            offset = self.get(data, offset, seek_offset)
-        return found, offset
+        seek_offset = seek(delim, self._buffer, 
+            self._current_size, self._read_index, self._available)
+        if seek_offset > 0:
+            return self.get(data, offset, seek_offset)
+        return seek_offset
 
     def get(self, data, offset=0, length=None):
         if length is None or length > self._available:
@@ -188,6 +188,21 @@ class CyclicBuffer(object):
 
     def remaining(self):
         return self._current_size - self._available
+
+    def __repr__(self):
+        readable = self._available
+        data = bytearray(readable)        
+        if self._read_index + readable >= self._current_size:
+            trimmed_length = self._current_size - self._read_index
+            next_read_index = readable - trimmed_length
+            array_copy(self._buffer, self._read_index, data,
+                       0, trimmed_length)
+            array_copy(self._buffer, 0, data,
+                       trimmed_length, next_read_index)
+        else:
+            array_copy(self._buffer, self._read_index,
+                       data, 0, readable)        
+        return str(data)
 
     def clear(self):
         self._read_index = 0

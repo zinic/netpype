@@ -92,10 +92,10 @@ class SyslogLexer(NetworkEventHandler):
 
     def on_read(self, message):
         # Load into our accumulator
-        self._accumulator.put(message, 0)
+        self._accumulator.put(message)
         while self._accumulator.available > 0 and self.parse_next():
             pass
-
+        
     def on_write(self, message):
         _LOG.info('Requesting close.')
         return (selection_events.REQUEST_CLOSE, None)
@@ -104,15 +104,16 @@ class SyslogLexer(NetworkEventHandler):
         _LOG.info('Closing connection to {}'.format(message))
 
     def _get_until(self, delimeter, read_limit):
-        found, self._read_offset = self._accumulator.get_until(
+        self._read_offset = self._accumulator.get_until(
             delim=delimeter,
             data=self._lookaside,
             limit=read_limit)
-        if found:
+        if self._read_offset > -1:
             # Skip the following delim and mark what we've read
             self._octet_count -= self._accumulator.skip(1)
             self._octet_count -= self._read_offset
-        return found
+            return True
+        return False
 
     def _next_token(self, offset=0):
         return self._lookaside[offset:self._read_offset]
@@ -124,6 +125,7 @@ class SyslogLexer(NetworkEventHandler):
             self._state = lexer_states.READ_OCTET
             self._structured_data = None
             self._sd_field = None
+        
         if self._state == lexer_states.READ_OCTET:
             if self._get_until(_SPACE_ORD, 9):
                 self._octet_count += int(self._next_token())
@@ -154,6 +156,7 @@ class SyslogLexer(NetworkEventHandler):
             if self._get_until(_SPACE_ORD, 48):
                 self._state = lexer_states.READ_PROCESSID
                 self._message.appname = self._next_token()
+                return True
         elif self._state == lexer_states.READ_PROCESSID:
             if self._get_until(_SPACE_ORD, 128):
                 self._state = lexer_states.READ_MESSAGEID
@@ -184,6 +187,7 @@ class SyslogLexer(NetworkEventHandler):
                 self._structured_data = self._message.sd_element(
                     self._next_token())
                 self._state = lexer_states.READ_SD_FIELD_NAME
+                return True
         elif self._state == lexer_states.READ_SD_FIELD_NAME:
             if self._get_until(_EQUALS_ORD, 32):
                 self._sd_field = self._structured_data.sd_field(
@@ -218,7 +222,6 @@ class SyslogLexer(NetworkEventHandler):
             if read > 0:
                 self._octet_count -= read
                 if self._octet_count == 0:
-                    self._accumulator.clear()
                     self._state = lexer_states.START
         return False
 
