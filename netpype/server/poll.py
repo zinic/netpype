@@ -1,10 +1,7 @@
-import socket
 import select
 import netpype.env as env
 
-from netpype import PersistentProcess
 from netpype.server import SelectorServer
-from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 from netpype.selector import events as selection_events
 
 
