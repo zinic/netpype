@@ -1,8 +1,6 @@
 import unittest
 import time
 
-import cProfile
-
 from netpype.examples.syslog import SyslogLexer, lexer_states
 
 
@@ -117,16 +115,16 @@ class WhenLexingSyslogHead(unittest.TestCase):
             chunk(HAPPY_PATH_MESSAGE, len(HAPPY_PATH_MESSAGE)))
         def check(sd_element):
             self.assertEqual(
-                'rsyslogd', str(sd_element.sd_field('software').value))
+                'rsyslogd', str(sd_element.fields['software'].value))
             self.assertEqual(
-                '7.2.2', str(sd_element.sd_field('swVersion').value))
+                '7.2.2', str(sd_element.fields['swVersion'].value))
             self.assertEqual(
-                '12297', str(sd_element.sd_field('x-pid').value))
+                '12297', str(sd_element.fields['x-pid'].value))
             self.assertEqual(
                 'http://www.rsyslog.com', 
-                str(sd_element.sd_field('x-info').value))
-        check(self.lexer._message.sd_element('origin_1'))
-        check(self.lexer._message.sd_element('origin_2'))
+                str(sd_element.fields['x-info'].value))
+        check(self.lexer._message.structured_data['origin_1'])
+        check(self.lexer._message.structured_data['origin_2'])
 
     def test_msg(self):
         self.lexer.on_connect('localhost')
@@ -161,9 +159,10 @@ def chunk(data, limit, chunk_size=10):
 
 
 if __name__ == '__main__':
-    cProfile.run('performance(10)')
-    #print('Executing warm-up run')
-    #performance(10, False)
-    #print('Executing performance test')
-    #performance(5)
+    print('Executing performance test')
+    performance(5)
+    
+    print('Profiling...')    
+    import cProfile
+    cProfile.run('performance(5)')
     #unittest.main()

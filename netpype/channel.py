@@ -10,13 +10,16 @@ except ImportError:
     _LOG.warn('Unable to find C extensions. Falling back on python impl.')
     def seek(delim, source, size, read_index, available):
         seek_offset = 0
-        while seek_offset < available:
-            seek_index = read_index + seek_offset
-            if seek_index + seek_offset >= size:
-                seek_index -= size
-            if source[seek_index] == delim:
-                return seek_offset
-            seek_offset += 1
+        seek_index = read_index
+        while seek_offset <= available:
+                if source[seek_index] == delim:
+                    return seek_offset
+        
+                if seek_index + 1 >= size:
+                    seek_index = 0
+                else:
+                    seek_index += 1
+                seek_offset += 1
         return -1
 
 _EMPTY_BUFFER = bytearray()
