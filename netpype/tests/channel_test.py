@@ -25,6 +25,21 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         self.assertEqual(4, buff.available())
         self.assertEqual(6, buff.remaining())
 
+    def test_recycling(self):
+        buff = channel.CyclicBuffer(size_hint=10, data=b'test')
+        dest = bytearray(10)
+        read = buff.get(dest)
+        self.assertEqual(4, read)
+        buff.put(b'testing!!')
+        read = buff.get(dest)
+        self.assertEqual(9, read)
+        self.assertEqual(0, buff.available())
+        buff.put(b'testing')
+        read = buff.get(dest)
+        self.assertEqual(7, read)
+        self.assertEqual(0, buff.available())
+        self.fail()
+
     def test_get(self):
         buff = channel.CyclicBuffer(data=b'test')
         self.assertEqual(4, buff.available())
@@ -46,10 +61,10 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         data = bytearray(10)
 
         # When the delim is not found, we return -1
-        read = buff.get_until(ord('_'), data)
-        self.assertEqual(-1, read)
+        found, read = buff.get_until(ord('_'), data)
+        self.assertFalse(found)
 
-        read = buff.get_until(ord(' '), data)
+        found, read = buff.get_until(ord(' '), data)
         self.assertEqual(4, read)
         self.assertEqual(6, buff.available())
         self.assertEqual('t', chr(data[0]))

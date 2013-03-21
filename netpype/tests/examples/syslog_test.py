@@ -131,19 +131,20 @@ class WhenLexingSyslogHead(unittest.TestCase):
         self.assertEqual(
             lexer_states.START, self.lexer.get_state())
         
-def performance():
+def performance(duration=10, print_output=True):
     lexer = SyslogLexer()
     data_length = len(HAPPY_PATH_MESSAGE)
     runs = 0
     then = time.time()
-    while time.time() - then < 10:
+    while time.time() - then < duration:
         map(lexer.on_read,
             chunk(HAPPY_PATH_MESSAGE, data_length, 1024))
         runs += 1
-    print('Ran {} times in {} seconds for {} runs per second.'.format(
-        runs,
-        10,
-        runs / 10.0))
+    if print_output:
+        print('Ran {} times in {} seconds for {} runs per second.'.format(
+            runs,
+            duration,
+            runs / float(duration)))
 
 
 def chunk(data, limit, chunk_size=10):
@@ -157,5 +158,8 @@ def chunk(data, limit, chunk_size=10):
 
 if __name__ == '__main__':
     #cProfile.run('performance()')
-    performance()
-    unittest.main()
+    print('Executing warm-up run')
+    performance(10, False)
+    print('Executing performance test')
+    performance(5)
+    #unittest.main()

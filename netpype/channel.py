@@ -66,7 +66,7 @@ def array_copy(source, src_offset, destination, dest_offset, length):
 
 
 class CyclicBuffer(object):
-
+    
     def __init__(self, size_hint=4096, data=None):
         if data:
             data_size = len(data)
@@ -81,51 +81,41 @@ class CyclicBuffer(object):
             self.clear()
 
     def seek(self, delim, limit=-1):
-        if self._has_elements:
-            available = self.available()
-            next_byte = bytearray(1)
-            peek_offset = 0
-
-            while peek_offset < available:
+        seek_offset = 0
+        if self._available > 0:
+            while seek_offset < self._available:
                 if limit > 0:
                     limit -= 1
                 elif limit == 0:
                     # TODO: Raise a more reasonable exception
-                    raise Exception
-                self._peek(next_byte, peek_offset)
-                if next_byte[0] == delim:
-                    return peek_offset
-                peek_offset += 1
-        return -1
+                    raise Exception('Read limit reached. Available')
+                seek_index = self._read_index + seek_offset
+                if seek_index+seek_offset >= self._current_size:
+                    seek_index -= self._current_size
+                if self._buffer[seek_index] == delim:
+                    return True, seek_offset
+                seek_offset += 1
+        return False, seek_offset
 
     def skip_until(self, delim, limit=-1):
-        seek_offset = self.seek(delim, limit)
-        if seek_offset != -1:
-            return self.skip(seek_offset)
-        return -1 
+        found, seek_offset = self.seek(delim, limit)
+        if found:
+            offset = self.skip(seek_offset)
+        return found, offset
 
     def get_until(self, delim, data, offset=0, limit=-1):
-        seek_offset = self.seek(delim, limit)
-        if seek_offset != -1:
-            return self.get(data, offset, seek_offset)
-        return -1
-
-    def _peek(self, data, offset=0):
-        if self._has_elements and self.available() > offset:
-            read_index = self._read_index + offset
-            if read_index >= self._current_size:
-                read_index -= self._current_size
-            array_copy(self._buffer, read_index, data, 0, 1)
-            return 1
-        return 0
+        found, seek_offset = self.seek(delim, limit)
+        if found:
+            offset = self.get(data, offset, seek_offset)
+        return found, offset
 
     def get(self, data, offset=0, length=None):
-        if length is None or length > self.available():
-            readable = self.available()
+        if length is None or length > self._available:
+            readable = self._available
         else:
             readable = length
 
-        if self._has_elements:
+        if self._available > 0:
             if self._read_index + readable >= self._current_size:
                 trimmed_length = self._current_size - self._read_index
                 next_read_index = readable - trimmed_length
@@ -142,14 +132,13 @@ class CyclicBuffer(object):
                 else:
                     self._read_index = readable - (
                         self._current_size - self._read_index)
-            if self._read_index == self._write_index:
-                self._has_elements = False
+            self._available -= readable
         return readable
 
     def put(self, data, offset=0, length=None):
-        if not length:
+        if length is None:
             length = len(data)
-        remaining = self.remaining()
+        remaining = self._current_size - self._available
         if remaining < length:
             self.grow(length - remaining)
         if self._write_index + length >= self._current_size:
@@ -164,8 +153,25 @@ class CyclicBuffer(object):
             array_copy(data, offset, self._buffer,
                        self._write_index, length)
             self._write_index += length
-        self._has_elements = True
+        self._available += length
         return length
+
+    def skip(self, length):
+        bytes_skipped = 0
+        if self._available > 0:
+            if length > self._available:
+                bytes_skipped = self._available
+                self._read_index = 0
+                self._write_index = 0
+            else:
+                bytes_skipped = length
+                if self._read_index + length < self._current_size:
+                    self._read_index += length
+                else:
+                    self._read_index = length - self._current_size
+                    self._read_index -= self._read_index
+            self._available -= bytes_skipped
+        return bytes_skipped
 
     def grow(self, min_length):
         new_size = self._current_size * 2 * (
@@ -176,46 +182,17 @@ class CyclicBuffer(object):
         self._current_size = new_size
         self._read_index = 0
         self._write_index = read
-        self._has_elements = True
-
-    def remaining(self):
-        if self._write_index == self._read_index and self._has_elements:
-            return 0
-        elif self._write_index < self._read_index:
-            return self._read_index - self._write_index
-        return self._current_size - self._write_index + self._read_index
 
     def available(self):
-        if self._write_index == self._read_index and self._has_elements:
-            return self._current_size
-        elif self._write_index < self._read_index:
-            return self._write_index + self._current_size - self._read_index
-        return self._write_index - self._read_index
+        return self._available
+
+    def remaining(self):
+        return self._current_size - self._available
 
     def clear(self):
-        self._has_elements = False
         self._read_index = 0
         self._write_index = 0
-
-    def skip(self, length):
-        bytes_skipped = length
-        bytes_available = self.available()
-
-        if length > bytes_available:
-            bytes_skipped = bytes_available
-            self._read_index = 0
-            self._write_index = 0
-        else:
-            if self._read_index + length < self._current_size:
-                self._read_index += length
-            else:
-                self._read_index = length - self._current_size
-                self._read_index -= self._read_index
-
-        if self._read_index == self._write_index:
-            self._has_elements = False
-
-        return bytes_skipped
+        self._available = 0
 
 
 """
