@@ -6,7 +6,7 @@ import netpype.env as env
 from netpype import PersistentProcess
 from netpype.channel import server_socket, HandlerPipeline, ChannelPipeline
 from netpype.selector import events as selection_events
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 
 
 _LOG = env.get_logger('netpype.server')

@@ -2,19 +2,29 @@ import time
 import netpype.env as env
 
 from netpype.selector import events as selection_events, new_server
-from netpype.channel import SocketINet4Address, CyclicBuffer
+from netpype.channel import SocketINet4Address
 from netpype.channel import NetworkEventHandler, PipelineFactory
 
+try:
+    from netpype.cutil import CyclicBuffer
+except ImportError:
+    from netpype.channel import CyclicBuffer
+
+# Delimeter constants
+_SPACE = ' '
+_QUOTE = '"'
+_EQUALS = '='
+_CLOSE_ANGLE_BRACKET = '>'
+_OPEN_BRACKET = '['
+_CLOSE_BRACKET = ']'
+
+# Ordinal values
+_SPACE_ORD = ord(_SPACE)
+_OPEN_BRACKET_ORD = ord(_OPEN_BRACKET)
+_CLOSE_BRACKET_ORD = ord(_CLOSE_BRACKET)
 
 _LOG = env.get_logger('netpype.examples.simple')
 _MAX_BYTES = 536870912
-
-_SPACE_ORD = ord(' ')
-_QUOTE_ORD = ord('"')
-_EQUALS_ORD = ord('=')
-_CLOSE_ANGLE_BRACKET_ORD = ord('>')
-_OPEN_BRACKET_ORD = ord('[')
-_CLOSE_BRACKET_ORD = ord(']')
 
 
 class LexerState(object):
@@ -101,9 +111,10 @@ class SyslogLexer(NetworkEventHandler):
 
     def _get_until(self, delimeter, read_limit):
         read = self._accumulator.get_until(
-            delim=delimeter,
-            data=self._lookaside,
-            limit=read_limit)
+            delimeter,
+            self._lookaside,
+            0,
+            read_limit)
         if read > -1:
             # Skip the following delim and mark what we've read
             self._accumulator.skip(1)
@@ -123,43 +134,43 @@ class SyslogLexer(NetworkEventHandler):
             self._sd_field = None
         
         if self._state == lexer_states.READ_OCTET:
-            if self._get_until(_SPACE_ORD, 9) > -1:
+            if self._get_until(_SPACE, 9) > -1:
                 self._octet_count += int(self._next_token())
                 self._message = SyslogMessage()
                 self._state = lexer_states.READ_PRI
                 return True
         elif self._state == lexer_states.READ_PRI:
-            if self._get_until(_CLOSE_ANGLE_BRACKET_ORD, 5) > -1:
+            if self._get_until(_CLOSE_ANGLE_BRACKET, 5) > -1:
                 self._state = lexer_states.READ_VERSION
                 self._message.priority = self._next_token(1)
                 return True
         elif self._state == lexer_states.READ_VERSION:
-            if self._get_until(_SPACE_ORD, 2) > -1:
+            if self._get_until(_SPACE, 2) > -1:
                 self._state = lexer_states.READ_TIMESTAMP
                 self._message.version = self._next_token()
                 return True
         elif self._state == lexer_states.READ_TIMESTAMP:
-            if self._get_until(_SPACE_ORD, 48) > -1:
+            if self._get_until(_SPACE, 48) > -1:
                 self._state = lexer_states.READ_HOSTNAME
                 self._message.timestamp = self._next_token()
                 return True
         elif self._state == lexer_states.READ_HOSTNAME:
-            if self._get_until(_SPACE_ORD, 255) > -1:
+            if self._get_until(_SPACE, 255) > -1:
                 self._state = lexer_states.READ_APPNAME
                 self._message.hostname = self._next_token()
                 return True
         elif self._state == lexer_states.READ_APPNAME:
-            if self._get_until(_SPACE_ORD, 48) > -1:
+            if self._get_until(_SPACE, 48) > -1:
                 self._state = lexer_states.READ_PROCESSID
                 self._message.appname = self._next_token()
                 return True
         elif self._state == lexer_states.READ_PROCESSID:
-            if self._get_until(_SPACE_ORD, 128) > -1:
+            if self._get_until(_SPACE, 128) > -1:
                 self._state = lexer_states.READ_MESSAGEID
                 self._message.processid = self._next_token()
                 return True
         elif self._state == lexer_states.READ_MESSAGEID:
-            if self._get_until(_SPACE_ORD, 32) > -1:
+            if self._get_until(_SPACE, 32) > -1:
                 self._state = lexer_states.READ_SD_ELEMENT
                 self._message.messageid = self._next_token()
                 return True
@@ -175,27 +186,27 @@ class SyslogLexer(NetworkEventHandler):
                 elif potential_delim == _OPEN_BRACKET_ORD:
                     self._state = lexer_states.READ_SD_ELEMENT_NAME
                 else:
-                    raise Exception('Unexpected: {} - {}'.format(
+                    raise Exception('Unexpected delimeter: {} - {}'.format(
                         chr(potential_delim), potential_delim))
                 return True
         elif self._state == lexer_states.READ_SD_ELEMENT_NAME:
-            if self._get_until(_SPACE_ORD, 32) > -1:
+            if self._get_until(_SPACE, 32) > -1:
                 self._structured_data = self._message.sd_element(
                     self._next_token())
                 self._state = lexer_states.READ_SD_FIELD_NAME
                 return True
         elif self._state == lexer_states.READ_SD_FIELD_NAME:
-            if self._get_until(_EQUALS_ORD, 32) > -1:
+            if self._get_until(_EQUALS, 32) > -1:
                 self._sd_field = self._structured_data.sd_field(
                     self._next_token())             
                 self._state = lexer_states.READ_SD_VALUE_START
                 return True
         elif self._state == lexer_states.READ_SD_VALUE_START:
-            if self._get_until(_QUOTE_ORD, 32) > -1:
+            if self._get_until(_QUOTE, 32) > -1:
                 self._state = lexer_states.READ_SD_VALUE_CONTENT
                 return True
         elif self._state == lexer_states.READ_SD_VALUE_CONTENT:
-            if self._get_until(_QUOTE_ORD, 255) > -1:
+            if self._get_until(_QUOTE, 255) > -1:
                 self._sd_field.value = self._next_token()
                 self._state = lexer_states.READ_SD_NEXT_FIELD_OR_END
                 return True
@@ -231,11 +242,11 @@ class SyslogPipelineFactory(PipelineFactory):
         return [SyslogLexer()]
 
     def downstream_pipeline(self):
-        return [EmptyHandler()]
+        return [SyslogLexer()]
 
 
 def go():
-    socket_info = SocketINet4Address('127.0.0.1', 8080)
+    socket_info = SocketINet4Address('127.0.0.1', 5140)
     server = new_server(socket_info, SyslogPipelineFactory())
     server.start()
     time.sleep(10000)

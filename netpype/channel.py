@@ -99,14 +99,14 @@ class CyclicBuffer(object):
             self.clear()
 
     def skip_until(self, delim, limit=-1):
-        seek_offset = seek(delim, self._buffer, 
+        seek_offset = seek(ord(delim), self._buffer, 
             self._current_size, self._read_index, self._available)
         if seek_offset > 0:
             return self.skip(seek_offset)
         return seek_offset
 
     def get_until(self, delim, data, offset=0, limit=-1):
-        seek_offset = seek(delim, self._buffer, 
+        seek_offset = seek(ord(delim), self._buffer, 
             self._current_size, self._read_index, self._available)
         if seek_offset > 0:
             return self.get(data, offset, seek_offset)

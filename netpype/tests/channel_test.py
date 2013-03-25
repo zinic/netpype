@@ -45,10 +45,10 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         data = bytearray(10)
 
         # When the delim is not found, we return -1
-        read = buff.get_until(ord('_'), data)
+        read = buff.get_until('_', data)
         self.assertEqual(-1, read)
         
-        read = buff.get_until(ord(' '), data)
+        read = buff.get_until(' ', data)
         self.assertEqual(4, read)
         self.assertEqual(6, buff.available())
         self.assertEqual('t', chr(data[0]))
@@ -56,7 +56,7 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         self.assertEqual('s', chr(data[2]))
         self.assertEqual('t', chr(data[3]))
         buff.skip(1)
-        read = buff.get_until(ord('!'), data, 4)
+        read = buff.get_until('!', data, 4)
         self.assertEqual(1, buff.available())
         self.assertEqual('t', chr(data[4]))
         self.assertEqual('e', chr(data[5]))

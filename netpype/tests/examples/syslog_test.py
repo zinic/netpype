@@ -4,6 +4,8 @@ import time
 from netpype.examples.syslog import SyslogLexer, lexer_states
 
 
+#HAPPY_PATH_MESSAGE = bytearray('158 <46>1 2013-03-20T23:01:23.425602-05:00 tohru rsyslogd - - - [origin software="rsyslogd" swVersion="7.2.5" x-pid="24902" x-info="http://www.rsyslog.com"] start')
+
 HAPPY_PATH_MESSAGE = bytearray(b'263 <46>1 2012-12-11T15:48:23.217459-06:00 tohru ' +
                       b'rsyslogd 6611 12512 [origin_1 software="rsyslogd" ' +
                       b'swVersion="7.2.2" x-pid="12297" ' +
@@ -159,6 +161,8 @@ def chunk(data, limit, chunk_size=10):
 
 
 if __name__ == '__main__':
+    print('Executing warmup')
+    performance(10, False)
     print('Executing performance test')
     performance(5)
     

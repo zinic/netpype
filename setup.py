@@ -11,9 +11,18 @@ from distutils.core import setup
 from distutils.extension import Extension
 from Cython.Distutils import build_ext
 
+COMPILER_ARGS = ['-O2']
+
 setup(
     cmdclass={'build_ext': build_ext},
-    ext_modules=[Extension("netpype.cutil", ["netpype/cutil.pyx"], extra_compile_args=['-O2'])]
+    ext_modules = [
+        Extension("netpype.cutil",
+                  ["netpype/cutil.pxd", "netpype/cutil.pyx"],
+                  extra_compile_args=COMPILER_ARGS),
+        Extension("netpype.csyslog",
+                  ["netpype/csyslog.pxd", "netpype/csyslog.pyx"],
+                  extra_compile_args=COMPILER_ARGS)
+    ]
 )
 
 setup(
