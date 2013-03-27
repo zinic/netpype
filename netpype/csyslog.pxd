@@ -1,19 +1,4 @@
-cdef enum _sd_token:
-    PRIORITY_TOKEN,
-    VERSION_TOKEN,
-    TIMESTAMP_TOKEN,
-    HOSTNAME_TOKEN,
-    APPNAME_TOKEN,
-    PROCESSID_TOKEN,
-    MESSAGEID_TOKEN,
-    SDE_NAME_TOKEN,
-    SDE_FIELD_NAME_TOKEN,
-    SDE_FIELD_VALUE_TOKEN,
-    MESSAGE_PART_TOKEN
-
-ctypedef _sd_token sd_token
-
-cdef enum _state:
+cdef enum _lexer_state:
     OCTET
     PRIORITY_BEGIN
     PRIORITY
@@ -32,7 +17,7 @@ cdef enum _state:
     STRUCTURED_DATA_END
     MESSAGE
 
-ctypedef _state state
+ctypedef _lexer_state lexer_state
 
 # Delimeter constants
 cdef char SPACE = ' '

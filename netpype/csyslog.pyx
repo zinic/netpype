@@ -4,36 +4,102 @@ from cython import array
 
 cdef extern from "Python.h":
     char* PyByteArray_AsString(object bytearray) except NULL
-    char* PyByteArray_Size(object bytearray) except NULL
+    char* PyByteArray_AS_STRING(object bytearray) except NULL
+    object PyString_FromStringAndSize(char *string, Py_ssize_t length)
     object PyByteArray_FromStringAndSize(char *string, Py_ssize_t length)
     int PyByteArray_Check(object bytearray)
+    int PyByteArray_Size(object bytearray)
     int PyByteArray_GET_SIZE(object bytearray)
 
 
-cdef struct parser_token:
-    sd_token token_type
-    char *value
-    int length
+NO_TOKENS = 0
+PRIORITY_TOKEN = 1
+VERSION_TOKEN = 2
+TIMESTAMP_TOKEN = 3
+HOSTNAME_TOKEN = 4
+APPNAME_TOKEN = 5
+PROCESSID_TOKEN = 6
+MESSAGEID_TOKEN = 7
+SDE_NAME_TOKEN = 8
+SDE_FIELD_NAME_TOKEN = 9
+SDE_FIELD_VALUE_TOKEN = 10
+MESSAGE_PART_TOKEN = 11
 
 
-cdef class SyslogParser(object):
+class SyslogMessageAccumulator(object):
 
-    def __cinit__(self):
-        pass
-
-
-def read_into(object bytearray, int offset, int length, SyslogLexer lexer):
-    if not PyByteArray_Check(bytearray):
-        raise Exception('Type bytearray expected.')
-    _read_into(PyByteArray_AsString(bytearray), offset, length, lexer)
+    def on_message_part(self, message_part):
+        raise NotImplementedError
 
 
-cdef int _read_into(char *bytes, int offset, int length, SyslogLexer lexer):
-    cdef int index = offset
-    while index < length and not lexer.has_token():
-        lexer.next(bytes[index])
-        index += 1
-    return index - offset
+class SyslogMessageHead(object):
+
+    def __init__(self):
+        self.priority = ''
+        self.version = ''
+        self.timestamp = ''
+        self.hostname = ''
+        self.appname = ''
+        self.processid = ''
+        self.messageid = ''
+        self.sd = dict()
+
+    def get_sd(self, name):
+        return self.sd.get(name)
+
+    def create_sd(self, sd_name):
+        self.sd[sd_name] = dict()
+
+    def add_sd_field(self, sd_name, sd_fieldname, sd_value):
+        self.sd[sd_name][sd_fieldname] = sd_value
+
+
+class SyslogParser():
+
+    def __init__(self, SyslogLexer lexer, message_accumulator=None):
+        self.lexer = lexer
+        self.message = SyslogMessageHead()
+        self.sd_name = None
+        self.sd_fieldname = None
+
+    def read(self, bytearray, offset=0, length=-1):
+        if length == -1:
+            length = len(bytearray)
+        index = offset
+        while index < length:
+            self.lexer.next(bytearray[index])
+            if self.lexer.has_token():
+                self.handle_token()
+            index += 1
+        return index - offset
+
+    def reset(self):
+        self.message = SyslogMessageHead()
+
+    def handle_token(self):
+        token_type = self.lexer.token_type()
+
+        if token_type == PRIORITY_TOKEN:
+            self.message.priority = self.lexer.get_token()
+        if token_type == VERSION_TOKEN:
+            self.message.version = self.lexer.get_token()
+        if token_type == TIMESTAMP_TOKEN:
+            self.message.timestamp = self.lexer.get_token()
+        if token_type == HOSTNAME_TOKEN:
+            self.message.hostname = self.lexer.get_token()
+        if token_type == APPNAME_TOKEN:
+            self.message.appname = self.lexer.get_token()
+        if token_type == PROCESSID_TOKEN:
+            self.message.processid = self.lexer.get_token()
+        if token_type == MESSAGEID_TOKEN:
+            self.message.messageid = self.lexer.get_token()
+        if token_type == SDE_NAME_TOKEN:
+            self.sde_name = self.lexer.get_token()
+            self.message.create_sd(self.sde_name)
+        if token_type == SDE_FIELD_NAME_TOKEN:
+            self.sde_field_name = self.lexer.get_token()
+        if token_type == SDE_FIELD_VALUE_TOKEN:
+            self.message.add_sd_field(self.sde_name, self.sde_field_name, self.lexer.get_token())
 
 
 # Delimeter constants
@@ -54,10 +120,10 @@ cdef int MAX_BYTES = 536870912
 
 cdef class SyslogLexer(object):
 
-    cdef int buffered_octets, token_length, octets_left, buffer_size
+    cdef Py_ssize_t token_length, buffer_size
+    cdef int buffered_octets, octets_left, token
     cdef char *read_buffer, *token_buffer
-    cdef sd_token token_type
-    cdef state current_state
+    cdef lexer_state current_state
 
     def __cinit__(self, int size_hint=RFC5424_MAX_BYTES):
         self.buffer_size = size_hint
@@ -71,33 +137,37 @@ cdef class SyslogLexer(object):
         if self.token_buffer is not NULL:
             free(self.token_buffer)
 
-    def token_size(self):
-        return self.token_length
-
-    def has_token(self):
-        return self.token_length > 0
-
-    def get_token(self):
-        return self._get_token()
-
     def reset(self):
         self._reset()
 
     def state(self):
         return self.current_state
 
+    cpdef int remaining(self):
+        return self.octets_left
+
+    cpdef int token_type(self):
+        return self.token
+
+    cpdef get_token(self):
+        cdef object next_token
+        # Export the token info
+        next_token = PyString_FromStringAndSize(self.token_buffer, self.token_length)
+        # Reset the local token info
+        self.token_length = 0
+        # Return the token
+        return next_token
+
+    cdef int token_size(self):
+        return self.token_length
+
+    cpdef bool has_token(self):
+        return self.token_length > 0
+
     cdef void _reset(self):
         self.current_state = OCTET
         self.buffered_octets = 0
         self.token_length = 0
-
-    cpdef int remaining(self):
-        return self.octets_left
-
-    cdef object _get_token(self):
-        cdef object bytearray = PyByteArray_FromStringAndSize(self.token_buffer, self.token_length)
-        self.token_length = 0
-        return bytearray
 
     cdef void collect(self, char byte):
         self.read_buffer[self.buffered_octets] = byte
@@ -110,16 +180,16 @@ cdef class SyslogLexer(object):
             index += 1
         self.buffered_octets = 0
 
-    cdef void buffer_token(self, sd_token token_type):
+    cdef void buffer_token(self, int token_type):
         # Swap buffers
+        self.token = token_type
         cdef char *buffer_ref = self.token_buffer
         self.token_buffer = self.read_buffer
         self.read_buffer = buffer_ref
-        self.token_type = token_type
         self.token_length = self.buffered_octets
         self.buffered_octets = 0
 
-    cdef void next(self, char next_byte):
+    def next(self, char next_byte):
         if self.current_state == OCTET:
             self.read_octet(next_byte)
         else:
@@ -182,7 +252,7 @@ cdef class SyslogLexer(object):
             raise Exception('Expected <')
         self.current_state = PRIORITY
 
-    cdef void read_token(self, char next_byte, char terminator, state next_state, sd_token token_type):
+    cdef void read_token(self, char next_byte, char terminator, lexer_state next_state, int token_type):
         if next_byte == terminator:
             self.buffer_token(token_type)
             self.current_state = next_state

@@ -23,7 +23,7 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         read = buff.get(dest)
         self.assertEqual(7, read)
         self.assertEqual(0, buff.available())
-        
+
     def test_get(self):
         buff = channel.CyclicBuffer(data=bytearray('test'))
         self.assertEqual(4, buff.available())
@@ -47,7 +47,7 @@ class WhenManipulatingCyclicBuffers(unittest.TestCase):
         # When the delim is not found, we return -1
         read = buff.get_until('_', data)
         self.assertEqual(-1, read)
-        
+
         read = buff.get_until(' ', data)
         self.assertEqual(4, read)
         self.assertEqual(6, buff.available())
